@@ -64,36 +64,37 @@ def _score_accuracy(products: List[Dict], source_of_truth_config: Dict) -> float
     if not products or not source_of_truth_config:
         return 100.0
 
-    sot_fields = list(source_of_truth_config.keys())
-    if not sot_fields:
-        return 100.0
-
+    sot_fields = list(source_of_truth_config.items())
     total_score = 0.0
 
     for product in products:
-        # Merge once per product instead of per field
+        # Merge once per product
         merged = {**(product.get('external_ids') or {}), **(product.get('raw_data') or {})}
+        
+        # Pre-parse all timestamps in the merged dict
+        parsed_timestamps = {
+            k: _parse_ts(v) for k, v in merged.items() if k.endswith('_updated_at')
+        }
+        
         correct = 0
-
-        for field, sot_system in source_of_truth_config.items():
+        for field, sot_system in sot_fields:
             sot_key = f'{sot_system}_{field}_updated_at'
-            sot_ts_raw = merged.get(sot_key)
+            sot_ts = parsed_timestamps.get(sot_key)
 
-            if not sot_ts_raw:
-                correct += 1  # Can't determine — treat as correct
-                continue
-
-            try:
-                sot_ts = datetime.fromisoformat(str(sot_ts_raw).replace('Z', '+00:00'))
-            except (ValueError, TypeError):
+            if sot_ts is None or sot_ts == datetime.min:
+                # Log a warning for missing SoT timestamps, but don't fail the score
+                logger.debug('Missing SoT timestamp for field %s in product %s', field, product.get('id'))
                 correct += 1
                 continue
 
-            is_newest = all(
-                _parse_ts(v) <= sot_ts
-                for k, v in merged.items()
-                if k.endswith(f'_{field}_updated_at') and k != sot_key
-            )
+            # Check if SoT is the newest
+            field_suffix = f'_{field}_updated_at'
+            is_newest = True
+            for k, ts in parsed_timestamps.items():
+                if k.endswith(field_suffix) and k != sot_key:
+                    if ts > sot_ts:
+                        is_newest = False
+                        break
 
             if is_newest:
                 correct += 1
@@ -144,20 +145,8 @@ def _fetch_products_batched(cur, tenant_id: str) -> List[Dict]:
 def calculate_quality_score(tenant_id: str, conn, cur) -> Optional[Dict]:
     """
     Calculate and persist the quality score snapshot for a tenant.
-    Called after each nightly scan.
-
-    Score = completeness × 0.4 + consistency × 0.4 + accuracy × 0.2
-
-    Transaction ownership: this function commits its own INSERT so the
-    snapshot is durable even when called as part of a larger job. Callers
-    should not wrap this in their own transaction.
     """
-    products = _fetch_products_batched(cur, tenant_id)
-
-    if not products:
-        logger.info('Tenant %s: no active products — skipping quality score', tenant_id)
-        return None
-
+    # 1. Fetch config
     cur.execute(
         'SELECT rule_type, parameters FROM rules WHERE tenant_id = %s AND is_active = TRUE',
         [tenant_id],
@@ -176,9 +165,42 @@ def calculate_quality_score(tenant_id: str, conn, cur) -> Optional[Dict]:
     settings = (tenant_row.get('settings') or {}) if tenant_row else {}
     required_fields = settings.get('required_fields', DEFAULT_REQUIRED_FIELDS)
 
-    completeness = _score_completeness(products, required_fields)
-    consistency  = _score_consistency(products, rules)
-    accuracy     = _score_accuracy(products, source_of_truth_config)
+    # 2. Process in batches to save memory
+    total_completeness = 0.0
+    total_consistency = 0.0
+    total_accuracy = 0.0
+    product_count = 0
+    offset = 0
+
+    while True:
+        cur.execute(
+            """SELECT * FROM products
+               WHERE tenant_id = %s AND product_status = 'active'
+               ORDER BY id
+               LIMIT %s OFFSET %s""",
+            [tenant_id, PRODUCT_BATCH_SIZE, offset],
+        )
+        batch = cur.fetchall()
+        if not batch:
+            break
+
+        # Calculate partial scores for this batch
+        total_completeness += _score_completeness(batch, required_fields) * len(batch)
+        total_consistency += _score_consistency(batch, rules) * len(batch)
+        total_accuracy += _score_accuracy(batch, source_of_truth_config) * len(batch)
+        
+        product_count += len(batch)
+        offset += len(batch)
+        if len(batch) < PRODUCT_BATCH_SIZE:
+            break
+
+    if product_count == 0:
+        logger.info('Tenant %s: no active products', tenant_id)
+        return None
+
+    completeness = round(total_completeness / product_count, 2)
+    consistency = round(total_consistency / product_count, 2)
+    accuracy = round(total_accuracy / product_count, 2)
 
     total = round(
         completeness * WEIGHT_COMPLETENESS +
@@ -192,14 +214,9 @@ def calculate_quality_score(tenant_id: str, conn, cur) -> Optional[Dict]:
              (tenant_id, score_total, score_completeness, score_consistency,
               score_accuracy, products_evaluated, calculated_at)
            VALUES (%s, %s, %s, %s, %s, %s, NOW())""",
-        [tenant_id, total, completeness, consistency, accuracy, len(products)],
+        [tenant_id, total, completeness, consistency, accuracy, product_count],
     )
     conn.commit()
-
-    logger.info(
-        'Quality score tenant=%s total=%s completeness=%s consistency=%s accuracy=%s products=%d',
-        tenant_id, total, completeness, consistency, accuracy, len(products),
-    )
 
     return {
         'quality_score': total,
@@ -208,5 +225,5 @@ def calculate_quality_score(tenant_id: str, conn, cur) -> Optional[Dict]:
             'consistency': consistency,
             'accuracy': accuracy,
         },
-        'products_evaluated': len(products),
+        'products_evaluated': product_count,
     }
