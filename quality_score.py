@@ -87,16 +87,18 @@ def _score_accuracy(products: List[Dict], source_of_truth_config: Dict) -> float
                 correct += 1
                 continue
 
-            # Check if SoT is the newest
+            # Check if SoT is the newest OR if PIM has overridden it
             field_suffix = f'_{field}_updated_at'
-            is_newest = True
+            is_correct = True
             for k, ts in parsed_timestamps.items():
                 if k.endswith(field_suffix) and k != sot_key:
-                    if ts > sot_ts:
-                        is_newest = False
+                    # If another external system is newer than SoT, it's an accuracy issue.
+                    # But if the PIM (manual override) is newer, we accept it.
+                    if ts > sot_ts and not k.startswith('pim_'):
+                        is_correct = False
                         break
 
-            if is_newest:
+            if is_correct:
                 correct += 1
 
         total_score += correct / len(sot_fields)
