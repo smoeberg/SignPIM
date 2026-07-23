@@ -93,6 +93,11 @@ def _rule_invalid_price(product: Dict[str, Any], parameters: Dict[str, Any]) -> 
 
 def _rule_valid_ean_13(product: Dict[str, Any], parameters: Dict[str, Any]) -> bool:
     ean = str(product.get('ean') or '').strip()
+    # If EAN is missing or '0', let the 'missing_ean' rule handle it.
+    # This avoids redundant errors for the same product.
+    if ean in ('', '0'):
+        return False
+
     if len(ean) != 13 or not ean.isdigit():
         return True
     # EAN-13 Checksum
