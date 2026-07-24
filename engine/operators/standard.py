@@ -1,17 +1,15 @@
-from .registry import operator
+from .registry import RichOperatorRegistry
 
-@operator('empty')
-def is_empty(val, target=None):
+def is_empty(val, target=None, context=None):
     return not bool(val)
 
-@operator('lte')
-def lte(val, target):
+def lte(val, target, context=None):
     return float(val or 0) <= float(target)
 
-@operator('min_length')
-def min_length(val, target):
+def min_length(val, target, context=None):
     return len(str(val or '')) < int(target)
 
-@operator('not_in')
-def not_in(val, target):
-    return val not in target if val else False
+# Register
+RichOperatorRegistry.register('empty', is_empty)
+RichOperatorRegistry.register('lte', lte)
+RichOperatorRegistry.register('min_length', min_length)

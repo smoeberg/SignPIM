@@ -1,93 +1,84 @@
 import yaml, os, glob
-from meta.schemas.models import EntitySchema, RuleSchema, WorkflowSchema
-from .operators import OperatorRegistry
-
-class TypeEngine:
-    @staticmethod
-    def validate_and_cast(field_def, value):
-        f_type = field_def.type
-        if field_def.required and value is None:
-            raise ValueError(f"Required field missing value.")
-        if value is None:
-            return None
-            
-        if f_type == 'number':
-            return float(value)
-        elif f_type == 'string':
-            return str(value)
-        elif f_type == 'boolean':
-            return bool(value)
-        elif f_type == 'enum' and field_def.values:
-            if value not in field_def.values:
-                raise ValueError(f"Value '{value}' not in enum {field_def.values}")
-        return value
+from meta.schemas.models import EntitySchema, WorkflowSchema
+from engine.types import TypeRegistry
+from engine.operators.registry import RichOperatorRegistry
+from engine.compiler import SchemaCompiler
 
 class SignalementEngine:
     def __init__(self, meta_dir, repository=None):
         self.repo = repository
-        self.meta = self._load_and_validate(meta_dir)
+        self.raw_meta = self._load_all(meta_dir)
+        self.compiled_ast = self._compile_all()
 
-    def _load_and_validate(self, root):
+    def _load_all(self, root):
         meta = {'entities': {}, 'rules': {}, 'workflow': {}}
-        
-        # Load Entities
-        for f in glob.glob(os.path.join(root, "entities/*.yaml")):
-            with open(f, 'r') as s:
-                raw = yaml.safe_load(s)
-                validated = EntitySchema(**raw) # Strict Pydantic Validation
-                meta['entities'][validated.name.lower()] = validated.model_dump()
-
-        # Load Rules
-        for f in glob.glob(os.path.join(root, "rules/*.yaml")):
-            with open(f, 'r') as s:
-                raw = yaml.safe_load(s)
-                # Flexible validation for rules
-                meta['rules'][raw.get('id', os.path.basename(f).replace('.yaml','')).lower()] = raw
-
-        # Load Workflows
-        for f in glob.glob(os.path.join(root, "workflow/*.yaml")):
-            with open(f, 'r') as s:
-                raw = yaml.safe_load(s)
-                validated = WorkflowSchema(**raw) # Strict Pydantic Validation
-                meta['workflow'][validated.name.lower()] = validated.model_dump()
-
-        print(f"  [META COMPILER] Successfully validated metadata with Pydantic.")
+        for cat in meta.keys():
+            path = os.path.join(root, cat)
+            if not os.path.exists(path): continue
+            for f in glob.glob(os.path.join(path, "*.yaml")):
+                with open(f, 'r') as s:
+                    data = yaml.safe_load(s)
+                    meta[cat][os.path.basename(f).replace('.yaml', '').lower()] = data
         return meta
+
+    def _compile_all(self):
+        compiled = {'entities': {}, 'workflows': {}}
+        
+        # 1. Compile Entities via Pydantic
+        for name, raw in self.raw_meta['entities'].items():
+            schema = EntitySchema(**raw)
+            compiled['entities'][schema.name.lower()] = schema.model_dump()
+
+        # 2. Compile Workflows via AST Compiler
+        for name, raw in self.raw_meta['workflow'].items():
+            schema = WorkflowSchema(**raw)
+            ast = SchemaCompiler.compile_workflow(schema, self.raw_meta['rules'])
+            compiled['workflows'][ast.name.lower()] = ast
+
+        print("  [COMPILER] All Metadata successfully compiled into Domain AST.")
+        return compiled
 
     def execute_workflow(self, workflow_name, data, tenant_id=None, context=None):
         if not tenant_id: raise PermissionError("Tenant ID required.")
         
-        wf = self.meta['workflow'].get(workflow_name.lower())
-        if not wf: raise ValueError(f"Workflow {workflow_name} not found.")
+        ast_wf = self.compiled_ast['workflows'].get(workflow_name.lower())
+        if not ast_wf: raise ValueError(f"Workflow '{workflow_name}' not found.")
         
-        entity_meta = self.meta['entities'].get(wf['entity'].lower())
-        if not entity_meta: raise ValueError(f"Entity {wf['entity']} not defined in metadata.")
+        entity_meta = self.compiled_ast['entities'].get(ast_wf.entity_name.lower())
+        if not entity_meta: raise ValueError(f"Entity '{ast_wf.entity_name}' not defined.")
 
-        print(f"\n>>> [GENERATION 2 RUNTIME] Executing {wf['name']} on Entity '{entity_meta['name']}'")
-        
-        # Step 1: Type Validation using Metadata
-        validated_data = {}
-        for f_name, f_def_dict in entity_meta['fields'].items():
-            f_def = f_def_dict
+        print(f"\n>>> [AST RUNTIME EXECUTOR] Executing {ast_wf.name} on AST Entity '{entity_meta['name']}'")
+
+        # Step 1: Type casting via TypeRegistry
+        typed_payload = {}
+        for f_name, f_def in entity_meta['fields'].items():
             val = data.get(f_name)
-            # Basic casting
-            validated_data[f_name] = val
+            t_handler = TypeRegistry.get(f_def['type'])
+            if t_handler:
+                typed_payload[f_name] = t_handler.cast_and_validate(val, f_def)
+            else:
+                typed_payload[f_name] = val
 
-        ctx = {"data": validated_data, "violations": [], "tenant_id": tenant_id}
+        ctx = {"data": typed_payload, "violations": [], "tenant_id": tenant_id}
 
-        # Step 2: AST Workflow Execution Planner
-        for step in wf['steps']:
-            action = step['action']
-            print(f"  - [Step] {action}")
-            
+        # Step 2: AST Execution
+        for step in ast_wf.execution_plan:
+            action = step.action
+            print(f"  - [AST Step] {action}")
+
             if action == 'validate':
-                for rid in step.get('rules', []):
-                    rule = self.meta['rules'].get(rid.lower())
+                for rid in step.rules:
+                    rule_key = str(rid).lower()
+                    rule = self.raw_meta['rules'].get(rule_key)
                     if rule:
-                        op_func = OperatorRegistry.get(rule.get('operator'))
-                        if op_func and op_func(ctx['data'].get(rule.get('field')), rule.get('value'), context):
-                            print(f"    [Violation] {rid}: {rule.get('message', {}).get('en', 'Validation failed')}")
-                            ctx['violations'].append(rid)
+                        op_def = RichOperatorRegistry.get(rule.get('operator'))
+                        if op_def:
+                            # Execute Rich Operator
+                            val = ctx['data'].get(rule.get('field'))
+                            is_violation = op_def.fn(val, rule.get('value'), context)
+                            if is_violation:
+                                print(f"    [Violation] {rule_key}: {rule.get('message', {}).get('en', 'Rule failed')}")
+                                ctx['violations'].append(rule_key)
 
             elif action == 'persist':
                 if self.repo:
