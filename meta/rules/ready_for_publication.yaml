@@ -1,0 +1,4 @@
+id: ready_for_publication
+entity: Product
+condition: "data.get('quality_score', 0) < 90"
+message: "Quality score is too low for publication (Minimum 90%)"
