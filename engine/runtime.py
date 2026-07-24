@@ -15,14 +15,21 @@ class SignalementEngine:
                     meta[cat][os.path.basename(f).replace(".yaml", "").lower()] = yaml.safe_load(s)
         return meta
 
+    def _check_ean13(self, ean):
+        """Validates EAN-13 check digit."""
+        if not ean or len(str(ean)) != 13 or not str(ean).isdigit():
+            return False
+        digits = [int(d) for d in str(ean)]
+        checksum = sum(digits[:12:2]) + sum(d * 3 for d in digits[1:12:2])
+        check_digit = (10 - (checksum % 10)) % 10
+        return digits[12] == check_digit
+
     def evaluate_rule(self, rule, data):
-        """Generic, secure rule evaluator that dispatches operators without raw eval()."""
         field = rule.get('field')
         op = rule.get('operator')
         target_val = rule.get('value')
         val = data.get(field) if field else None
 
-        # Custom logic dispatching based on rule structure
         if op == 'empty':
             return not bool(val)
         elif op == 'lte':
@@ -32,11 +39,14 @@ class SignalementEngine:
         elif op == 'not_in':
             return val not in target_val if val else False
         elif op == 'ean13_check':
+            return not self._check_ean13(val)
+        elif op == 'price_deviation_check':
+            # Simplified mock for market average check
+            market_avg = 100 
             if not val: return False
-            val_str = str(val).strip()
-            return not (len(val_str) == 13 and val_str.isdigit())
+            deviation = abs(float(val) - market_avg) / market_avg
+            return deviation > float(target_val)
         
-        # Fallback for legacy string conditions
         cond = rule.get('condition', '')
         if "quality_score" in cond and "< 90" in cond:
             return float(data.get('quality_score', 0)) < 90
@@ -78,21 +88,24 @@ class SignalementEngine:
             elif action == 'calculate_quality':
                 q_cfg = self.meta['rules']['quality']['scoring_model']
                 weights = q_cfg['weights']
-                
                 completeness = 100 - (len(ctx['violations']) * 15)
                 consistency = 100
                 accuracy = 100
-                
                 if not ctx['data'].get('sot_timestamp') and q_cfg['behavior']['missing_source_of_truth'] == "fail_accuracy":
-                    print("  - [Quality Warning] Missing Source of Truth timestamp.")
                     accuracy = 0
-
                 score = max(0, (completeness * weights['completeness'] + 
                                 consistency * weights['consistency'] + 
                                 accuracy * weights['accuracy']) / 100)
                 ctx['quality_score'] = score
                 ctx['data']['quality_score'] = score
                 print(f"  - [Quality Score] {score}%")
+
+            elif action == 'auto_resolve':
+                ar_cfg = self.meta['rules']['autoresolve']['policy']
+                if not ctx['violations']:
+                    print(f"  - [Auto-Resolve] Success. Threshold: {ar_cfg['required_successes']}")
+                else:
+                    print(f"  - [Auto-Resolve] Blocked by {len(ctx['violations'])} violations.")
 
             elif action == 'persist':
                 if self.db:

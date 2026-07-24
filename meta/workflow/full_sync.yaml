@@ -3,7 +3,7 @@ steps:
   - action: transform
     rules: [{ field: price, op: multiply, value: 1.25 }, { field: name, op: uppercase }]
   - action: validate
-    rules: [missing_images, ready_for_publication]
+    rules: [missing_images, ready_for_publication, invalid_price, missing_sku, missing_ean, category_required, short_description, unsupported_currency, valid_ean_13, price_deviation]
   - action: calculate_quality
   - action: auto_resolve
   - action: persist

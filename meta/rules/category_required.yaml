@@ -1,0 +1,4 @@
+id: category_required
+field: category
+operator: empty
+message: "Product category is required"
