@@ -1,32 +1,36 @@
 import os
 from engine.runtime import SignalementEngine
+from core.repository import Repository
 from core.database import DBService
 
 def main():
     print("========================================")
-    print("   SIGNALEMENT v6.1 - PRODUCTION READY ")
+    print("   SIGNALEMENT v6.2 - META RUNTIME     ")
     print("========================================\n")
     
-    # Externalize DSN to environment variable (Fallback for local dev)
-    db_url = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost:5432/pim_db")
-    db = DBService(db_url)
+    # 1. Setup Infrastructure
+    db = DBService(os.getenv("DATABASE_URL"))
+    repo = Repository(db)
     
+    # 2. Initialize Generic Engine
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    engine = SignalementEngine(os.path.join(base_dir, 'meta'), db=db)
+    engine = SignalementEngine(os.path.join(base_dir, 'meta'), repository=repo)
     
-    # Test product with multiple validation triggers
+    # 3. Data with Context
     product = {
-        "sku": "PROD-2026-X",
-        "name": "enterprise server rack",
-        "price": 0, # Should trigger invalid_price rule
-        "description": "Short", # Should trigger short_description rule
-        "images": [], # Should trigger missing_images rule
-        "ean": "12345", # Should trigger valid_ean_13 rule
-        "sot_timestamp": "2026-07-24"
+        "sku": "V62-META-99",
+        "name": "Generic Sofa",
+        "price": 500,
+        "images": None, # Violation
+        "ean": "12345" # Violation
     }
+    context = {"market_avg": 450}
     
-    # Execute Full Sync Workflow
-    engine.execute_workflow("Full_Sync", product, tenant_id="TENANT_ENTERPRISE_1")
+    # 4. Run Workflow
+    try:
+        engine.execute_workflow("Full_Sync", product, tenant_id="T_GENERIC", context=context)
+    except Exception as e:
+        print(f"Error: {e}")
 
 if __name__ == "__main__":
     main()

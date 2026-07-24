@@ -1,9 +1,12 @@
 name: FullSyncWorkflow
+entity: Product
 steps:
   - action: transform
-    rules: [{ field: price, op: multiply, value: 1.25 }, { field: name, op: uppercase }]
+    rules: [{ field: price, op: multiply, value: 1.25 }]
   - action: validate
-    rules: [missing_images, ready_for_publication, invalid_price, missing_sku, missing_ean, category_required, short_description, unsupported_currency, valid_ean_13, price_deviation]
-  - action: calculate_quality
-  - action: auto_resolve
+    rules: [missing_images, missing_sku, invalid_price, valid_ean_13]
+  - action: calculate
+    using: quality_weights
+  - action: validate
+    rules: [ready_for_publication]
   - action: persist
