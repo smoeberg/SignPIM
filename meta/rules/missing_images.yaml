@@ -1,0 +1,3 @@
+id: missing_images
+condition: "not data.get('images')"
+message: "Product is missing images"
