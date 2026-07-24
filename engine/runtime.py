@@ -3,6 +3,7 @@ from meta.schemas.models import EntitySchema, WorkflowSchema
 from engine.types import TypeRegistry
 from engine.operators.registry import RichOperatorRegistry
 from engine.compiler import SchemaCompiler
+from engine.planner import ExecutionPlanner
 
 class SignalementEngine:
     def __init__(self, meta_dir, repository=None):
@@ -22,34 +23,35 @@ class SignalementEngine:
         return meta
 
     def _compile_all(self):
-        compiled = {'entities': {}, 'workflows': {}}
+        compiled = {'entities': {}, 'workflows': {}, 'graphs': {}}
         
-        # 1. Compile Entities via Pydantic
         for name, raw in self.raw_meta['entities'].items():
             schema = EntitySchema(**raw)
             compiled['entities'][schema.name.lower()] = schema.model_dump()
 
-        # 2. Compile Workflows via AST Compiler
         for name, raw in self.raw_meta['workflow'].items():
             schema = WorkflowSchema(**raw)
             ast = SchemaCompiler.compile_workflow(schema, self.raw_meta['rules'])
+            graph = ExecutionPlanner.build_execution_graph(ast)
+            
             compiled['workflows'][ast.name.lower()] = ast
+            compiled['graphs'][ast.name.lower()] = graph
 
-        print("  [COMPILER] All Metadata successfully compiled into Domain AST.")
+        print("  [PLATFORM RUNTIME] Metadata compiled into Execution Graphs.")
         return compiled
 
     def execute_workflow(self, workflow_name, data, tenant_id=None, context=None):
         if not tenant_id: raise PermissionError("Tenant ID required.")
         
-        ast_wf = self.compiled_ast['workflows'].get(workflow_name.lower())
-        if not ast_wf: raise ValueError(f"Workflow '{workflow_name}' not found.")
+        graph = self.compiled_ast['graphs'].get(workflow_name.lower())
+        if not graph: raise ValueError(f"Workflow '{workflow_name}' graph not found.")
         
+        ast_wf = self.compiled_ast['workflows'].get(workflow_name.lower())
         entity_meta = self.compiled_ast['entities'].get(ast_wf.entity_name.lower())
-        if not entity_meta: raise ValueError(f"Entity '{ast_wf.entity_name}' not defined.")
 
-        print(f"\n>>> [AST RUNTIME EXECUTOR] Executing {ast_wf.name} on AST Entity '{entity_meta['name']}'")
+        print(f"\n>>> [GRAPH EXECUTOR] Executing Graph '{graph.workflow_name}' ({len(graph.nodes)} Nodes)")
 
-        # Step 1: Type casting via TypeRegistry
+        # Step 1: TypeRegistry Casting & Normalization
         typed_payload = {}
         for f_name, f_def in entity_meta['fields'].items():
             val = data.get(f_name)
@@ -61,26 +63,23 @@ class SignalementEngine:
 
         ctx = {"data": typed_payload, "violations": [], "tenant_id": tenant_id}
 
-        # Step 2: AST Execution
-        for step in ast_wf.execution_plan:
-            action = step.action
-            print(f"  - [AST Step] {action}")
+        # Step 2: Node Graph Execution (Planner Layer)
+        for node in graph.nodes:
+            print(f"  - [Node: {node.node_id}] Action: {node.action}")
 
-            if action == 'validate':
-                for rid in step.rules:
+            if node.action == 'validate':
+                for rid in node.rules:
                     rule_key = str(rid).lower()
                     rule = self.raw_meta['rules'].get(rule_key)
                     if rule:
                         op_def = RichOperatorRegistry.get(rule.get('operator'))
                         if op_def:
-                            # Execute Rich Operator
                             val = ctx['data'].get(rule.get('field'))
-                            is_violation = op_def.fn(val, rule.get('value'), context)
-                            if is_violation:
+                            if op_def.fn(val, rule.get('value'), context):
                                 print(f"    [Violation] {rule_key}: {rule.get('message', {}).get('en', 'Rule failed')}")
                                 ctx['violations'].append(rule_key)
 
-            elif action == 'persist':
+            elif node.action == 'persist':
                 if self.repo:
                     self.repo.save(entity_meta, ctx['data'], tenant_id)
 

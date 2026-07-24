@@ -1,12 +1,17 @@
 from pydantic import BaseModel
-from typing import Callable, Optional, Any
+from typing import Callable, Optional, List
 
 class OperatorMetadata(BaseModel):
     name: str
     version: str = "1.0.0"
+    category: str = "validation"
     is_deterministic: bool = True
-    input_type: Optional[str] = "any"
-    output_type: str = "boolean"
+    side_effects: bool = False
+    transactional: bool = True
+    is_async: bool = False
+    security_level: str = "standard"
+    timeout_ms: int = 5000
+    required_context: List[str] = []
 
 class OperatorDefinition:
     def __init__(self, metadata: OperatorMetadata, fn: Callable):
@@ -17,8 +22,8 @@ class RichOperatorRegistry:
     _operators = {}
 
     @classmethod
-    def register(cls, name: str, fn: Callable, version: str = "1.0.0", is_deterministic: bool = True):
-        meta = OperatorMetadata(name=name, version=version, is_deterministic=is_deterministic)
+    def register(cls, name: str, fn: Callable, **kwargs):
+        meta = OperatorMetadata(name=name, **kwargs)
         cls._operators[name] = OperatorDefinition(meta, fn)
 
     @classmethod
