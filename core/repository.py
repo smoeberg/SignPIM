@@ -1,8 +1,13 @@
 class Repository:
-    def __init__(self, db_service):
-        self.db = db_service
+    def __init__(self, storage_adapter):
+        self.adapter = storage_adapter
 
-    def save(self, entity_name, data, tenant_id):
-        # Maps entity to table based on metadata would go here
-        print(f"    [Repository] Persisting {entity_name} for tenant {tenant_id}")
-        return self.db.save_product(data, data.get('quality_score', 0), tenant_id)
+    def save(self, entity_meta, data, tenant_id):
+        """Saves data strictly according to Entity Metadata. Completely domain-agnostic."""
+        table_name = entity_meta['storage']['table_name']
+        valid_fields = entity_meta['fields'].keys()
+        
+        # Filter payload to only include fields defined in metadata
+        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
+        
+        return self.adapter.save_entity(table_name, filtered_data, tenant_id)
