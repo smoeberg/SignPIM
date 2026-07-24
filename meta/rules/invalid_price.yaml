@@ -1,0 +1,5 @@
+id: invalid_price
+field: price
+operator: lte
+value: 0
+message: "Price must be a positive number"

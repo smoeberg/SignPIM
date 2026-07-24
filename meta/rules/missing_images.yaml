@@ -1,3 +1,4 @@
 id: missing_images
-condition: "not data.get('images')"
+field: images
+operator: empty
 message: "Product is missing images"

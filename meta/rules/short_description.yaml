@@ -1,0 +1,5 @@
+id: short_description
+field: description
+operator: min_length
+value: 50
+message: "Description must be at least 50 characters"

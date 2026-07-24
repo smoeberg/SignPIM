@@ -1,0 +1,4 @@
+id: valid_ean_13
+field: ean
+operator: ean13_check
+message: "EAN must be exactly 13 numeric digits"

@@ -15,26 +15,42 @@ class SignalementEngine:
                     meta[cat][os.path.basename(f).replace(".yaml", "").lower()] = yaml.safe_load(s)
         return meta
 
-    def safe_eval(self, condition, data):
-        """Safer condition checking without raw dangerous eval execution."""
-        try:
-            # Basic safe matching for images check and missing SoT
-            if "not data.get('images')" in condition:
-                return not bool(data.get('images'))
-            if "quality_score" in condition and "< 90" in condition:
-                return float(data.get('quality_score', 0)) < 90
-            return False
-        except Exception:
-            return False
+    def evaluate_rule(self, rule, data):
+        """Generic, secure rule evaluator that dispatches operators without raw eval()."""
+        field = rule.get('field')
+        op = rule.get('operator')
+        target_val = rule.get('value')
+        val = data.get(field) if field else None
+
+        # Custom logic dispatching based on rule structure
+        if op == 'empty':
+            return not bool(val)
+        elif op == 'lte':
+            return float(val or 0) <= float(target_val)
+        elif op == 'min_length':
+            return len(str(val or '')) < int(target_val)
+        elif op == 'not_in':
+            return val not in target_val if val else False
+        elif op == 'ean13_check':
+            if not val: return False
+            val_str = str(val).strip()
+            return not (len(val_str) == 13 and val_str.isdigit())
+        
+        # Fallback for legacy string conditions
+        cond = rule.get('condition', '')
+        if "quality_score" in cond and "< 90" in cond:
+            return float(data.get('quality_score', 0)) < 90
+            
+        return False
 
     def execute_workflow(self, workflow_name, data, tenant_id=None):
         if not tenant_id:
-            raise PermissionError("CRITICAL: Tenant ID required for isolation.")
+            raise PermissionError("CRITICAL: Tenant isolation required.")
             
         wf_key = workflow_name.lower()
         wf = self.meta['workflow'].get(wf_key)
         if not wf:
-            print(f"Error: Workflow {workflow_name} not found.")
+            print(f"Error: Workflow '{workflow_name}' not found.")
             return
             
         print(f"\n>>> Executing Workflow: {wf['name']} (Tenant: {tenant_id})")
@@ -50,44 +66,36 @@ class SignalementEngine:
                         ctx['data'][f] = float(ctx['data'].get(f, 0)) * t['value']
                     elif t['op'] == 'uppercase':
                         ctx['data'][f] = str(ctx['data'].get(f, "")).upper()
-                print(f"  - [Transform] Product data updated.")
+                print(f"  - [Transform] Completed.")
 
             elif action == 'validate':
                 for rid in step.get('rules', []):
                     rule = self.meta['rules'].get(rid.lower())
-                    if rule and self.safe_eval(rule['condition'], ctx['data']):
-                        print(f"  - [Violation] {rule['id']}: {rule.get('message', 'Rule failed')}")
+                    if rule and self.evaluate_rule(rule, ctx['data']):
+                        print(f"  - [Violation Detected] {rule['id']}: {rule.get('message')}")
                         ctx['violations'].append(rule['id'])
 
             elif action == 'calculate_quality':
                 q_cfg = self.meta['rules']['quality']['scoring_model']
                 weights = q_cfg['weights']
                 
-                completeness = 100 - (len(ctx['violations']) * 20)
+                completeness = 100 - (len(ctx['violations']) * 15)
                 consistency = 100
                 accuracy = 100
                 
-                # Check for missing SoT (Accuracy Fix)
                 if not ctx['data'].get('sot_timestamp') and q_cfg['behavior']['missing_source_of_truth'] == "fail_accuracy":
-                    print("  - [Quality Warning] Missing SoT timestamp -> Accuracy set to 0%")
+                    print("  - [Quality Warning] Missing Source of Truth timestamp.")
                     accuracy = 0
 
-                score = (completeness * weights['completeness'] + 
-                         consistency * weights['consistency'] + 
-                         accuracy * weights['accuracy']) / 100
+                score = max(0, (completeness * weights['completeness'] + 
+                                consistency * weights['consistency'] + 
+                                accuracy * weights['accuracy']) / 100)
                 ctx['quality_score'] = score
                 ctx['data']['quality_score'] = score
-                print(f"  - [Quality Score] Calculated: {score}%")
-
-            elif action == 'auto_resolve':
-                ar_cfg = self.meta['rules']['autoresolve']['policy']
-                if not ctx['violations']:
-                    print(f"  - [Auto-Resolve] Passed stability window. Resolving pending issues.")
-                else:
-                    print(f"  - [Auto-Resolve] Blocked due to active violations ({len(ctx['violations'])})")
+                print(f"  - [Quality Score] {score}%")
 
             elif action == 'persist':
                 if self.db:
-                    self.db.save(ctx['data'], ctx['quality_score'], tenant_id)
+                    self.db.save_product(ctx['data'], ctx['quality_score'], tenant_id)
 
         return ctx
