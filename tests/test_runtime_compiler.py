@@ -33,7 +33,7 @@ def test_pure_graph_runtime_execution():
                         ConditionNode(
                             rule_id="r1",
                             operator_node=OperatorNode(
-                                operator_name="missing_images",
+                                operator_name="empty",
                                 field="images",
                                 target_value=None
                             ),
