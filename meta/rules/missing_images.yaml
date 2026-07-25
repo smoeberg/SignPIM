@@ -1,0 +1,8 @@
+id: missing_images
+field: images
+operator: empty
+category: completeness
+severity: critical
+message:
+  da: "Mangler billeder"
+  en: "Missing images"

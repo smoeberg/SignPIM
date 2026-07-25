@@ -1,0 +1,4 @@
+id: missing_sku
+field: sku
+operator: empty
+message: "SKU is required"

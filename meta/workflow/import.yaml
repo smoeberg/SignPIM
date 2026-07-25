@@ -1,0 +1,6 @@
+name: ImportWorkflow
+steps:
+  - action: validate
+    rules: [missing_images]
+  - action: calculate_quality
+  - action: persist

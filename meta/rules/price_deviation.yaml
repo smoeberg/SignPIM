@@ -1,0 +1,5 @@
+id: price_deviation
+field: price
+operator: price_deviation_check
+value: 0.2
+message: "Price deviates significantly from market average"

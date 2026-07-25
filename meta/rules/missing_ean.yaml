@@ -1,0 +1,4 @@
+id: missing_ean
+field: ean
+operator: empty
+message: "EAN code is missing"

@@ -1,0 +1,5 @@
+id: unsupported_currency
+field: currency
+operator: not_in
+value: [DKK, EUR, USD, GBP, SEK, NOK]
+message: "Currency is not supported"

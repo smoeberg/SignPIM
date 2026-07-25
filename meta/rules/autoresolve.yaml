@@ -1,0 +1,1 @@
+policy: { required_successes: 2, flapping_threshold: 3 }

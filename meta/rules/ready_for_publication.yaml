@@ -1,0 +1,9 @@
+id: ready_for_publication
+field: quality_score
+operator: lte
+value: 90
+category: gating
+severity: blocking
+message:
+  da: "Kvalitet for lav til publicering"
+  en: "Quality score too low for publication"

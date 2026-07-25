@@ -1,0 +1,7 @@
+id: quality_weights
+type: scoring_config
+weights:
+  completeness: 40
+  consistency: 40
+  accuracy: 20
+severity: info

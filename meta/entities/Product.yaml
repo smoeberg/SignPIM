@@ -1,0 +1,10 @@
+name: Product
+storage:
+  table_name: "pim_products"
+  audit_enabled: true
+fields:
+  sku: { type: string, required: true, unique: true }
+  name: { type: string, required: true }
+  price: { type: number, required: true }
+  status: { type: enum, values: [draft, ready, published] }
+  quality_score: { type: number }
