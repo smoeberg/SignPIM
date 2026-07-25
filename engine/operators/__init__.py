@@ -1,2 +1,2 @@
 from . import standard, pim
-from .registry import OperatorRegistry
+from .registry import RichOperatorRegistry

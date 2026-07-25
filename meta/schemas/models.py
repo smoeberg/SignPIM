@@ -32,5 +32,5 @@ class WorkflowStep(BaseModel):
 
 class WorkflowSchema(BaseModel):
     name: str
-    entity: str
+    entity: Optional[str] = "Product"
     steps: List[WorkflowStep]

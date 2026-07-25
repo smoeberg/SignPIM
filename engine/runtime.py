@@ -35,6 +35,7 @@ class SignalementEngine:
         for name, raw in self.raw_meta['entities'].items():
             schema = EntitySchema(**raw)
             compiled['entities'][schema.name.lower()] = schema.model_dump()
+            compiled['entities'][name.lower()] = schema.model_dump()
 
         for name, raw in self.raw_meta['workflow'].items():
             schema = WorkflowSchema(**raw)
@@ -42,7 +43,9 @@ class SignalementEngine:
             graph = ExecutionPlanner.build_execution_graph(ast)
             
             compiled['workflows'][ast.name.lower()] = ast
+            compiled['workflows'][name.lower()] = ast
             compiled['graphs'][ast.name.lower()] = graph
+            compiled['graphs'][name.lower()] = graph
 
         logger.info("Metadata successfully compiled into Execution Graphs.")
         return compiled
@@ -61,13 +64,16 @@ class SignalementEngine:
         logger.info(f"Executing Graph '{graph.workflow_name}' ({len(graph.nodes)} Nodes) for Tenant: {tenant_id}")
 
         typed_payload: Dict[str, Any] = {}
-        for f_name, f_def in entity_meta['fields'].items():
-            val = data.get(f_name)
-            t_handler = TypeRegistry.get(f_def['type'])
-            if t_handler:
-                typed_payload[f_name] = t_handler.cast_and_validate(val, f_def)
-            else:
-                typed_payload[f_name] = val
+        if entity_meta and 'fields' in entity_meta:
+            for f_name, f_def in entity_meta['fields'].items():
+                val = data.get(f_name)
+                t_handler = TypeRegistry.get(f_def['type'])
+                if t_handler:
+                    typed_payload[f_name] = t_handler.cast_and_validate(val, f_def)
+                else:
+                    typed_payload[f_name] = val
+        else:
+            typed_payload = data
 
         ctx: Dict[str, Any] = {"data": typed_payload, "violations": [], "tenant_id": tenant_id}
 
@@ -83,11 +89,13 @@ class SignalementEngine:
                         if op_def:
                             val = ctx['data'].get(rule.get('field'))
                             if op_def.fn(val, rule.get('value'), context):
-                                logger.warning(f"Violation Detected [{rule_key}]: {rule.get('message', {}).get('en', 'Rule failed')}")
+                                msg = rule.get('message', 'Rule failed')
+                                msg_str = msg.get('en', str(msg)) if isinstance(msg, dict) else str(msg)
+                                logger.warning(f"Violation Detected [{rule_key}]: {msg_str}")
                                 ctx['violations'].append(rule_key)
 
             elif node.action == 'persist':
-                if self.repo:
+                if self.repo and entity_meta:
                     self.repo.save(entity_meta, ctx['data'], tenant_id)
 
         return ctx
