@@ -12,11 +12,10 @@ class PureGraphRuntime:
 
     def execute(self, graph: ExecutionGraph, entity_meta: Dict[str, Any], data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
         if not tenant_id:
-            raise PermissionError("Tenant ID is strictly required.")
+            raise PermissionError("Tenant ID is strictly required for isolation.")
 
         logger.info(f"Executing Graph '{graph.workflow_name}' ({len(graph.nodes)} Nodes) for Tenant: {tenant_id}")
 
-        # Type Casting
         typed_payload: Dict[str, Any] = {}
         if entity_meta and 'fields' in entity_meta:
             for f_name, f_def in entity_meta['fields'].items():
@@ -31,7 +30,6 @@ class PureGraphRuntime:
 
         ctx = {"data": typed_payload, "violations": [], "tenant_id": tenant_id}
 
-        # Traverse Node Graph
         for node in graph.nodes:
             action = node.action_node
             logger.info(f"Graph Node Executing [{node.node_id}] Action: {action.action_type}")
@@ -45,6 +43,13 @@ class PureGraphRuntime:
                         if op_def.fn(val, op.target_value, None):
                             logger.warning(f"Violation Detected [{cond.rule_id}]: {cond.message}")
                             ctx['violations'].append(cond.rule_id)
+
+            elif action.action_type == 'transform':
+                for cond in action.conditions:
+                    op = cond.operator_node
+                    if op.operator_name == 'multiply' and op.field in ctx['data']:
+                        ctx['data'][op.field] = ctx['data'][op.field] * float(op.target_value)
+                        logger.info(f"Transformed field [{op.field}] using operator multiply: {ctx['data'][op.field]}")
 
             elif action.action_type == 'persist':
                 if self.repo and entity_meta:

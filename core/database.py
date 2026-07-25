@@ -1,4 +1,3 @@
-import re
 import logging
 from typing import Dict, Any
 
@@ -13,8 +12,7 @@ class GenericDBService:
     def sanitize_table_name(self, table_name: str) -> str:
         clean_name = table_name.lower().strip()
         if clean_name not in ALLOWED_TABLES:
-            if not re.match(r'^[a-zA-Z0-9_]+$', clean_name):
-                raise ValueError(f"Invalid table name: {table_name}")
+            raise ValueError(f"Unauthorized table name: '{table_name}'. Must be one of {ALLOWED_TABLES}")
         return clean_name
 
     def save_entity(self, table_name: str, payload: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
