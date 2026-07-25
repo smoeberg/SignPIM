@@ -2,13 +2,17 @@ const express = require('express');
 const router = express.Router();
 const { productSchema } = require('../validation/productSchema');
 const { AppError } = require('../middleware/errorHandler');
+const { authenticateToken } = require('../middleware/auth');
 const { ProductService } = require('../../services/productService');
 
 const productService = new ProductService();
 
+// Apply auth middleware to all product routes
+router.use(authenticateToken);
+
 router.get('/', async (req, res, next) => {
   try {
-    res.json({ status: 'ok', data: [] });
+    res.json({ status: 'ok', data: [], tenantId: req.user?.tenantId });
   } catch (err) {
     next(err);
   }
