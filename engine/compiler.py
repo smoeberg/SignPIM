@@ -12,17 +12,27 @@ class SchemaCompiler:
             conditions = []
             if step.rules:
                 for rid in step.rules:
-                    rule_key = str(rid).lower()
-                    rule = raw_rules.get(rule_key, {})
-                    
-                    op_node = OperatorNode(
-                        operator_name=rule.get('operator', 'equals'),
-                        field=rule.get('field'),
-                        target_value=rule.get('value')
-                    )
-                    
-                    msg = rule.get('message', '')
-                    msg_str = msg.get('en', str(msg)) if isinstance(msg, dict) else str(msg)
+                    # Check if rule is inline dict or string ID
+                    if isinstance(rid, dict):
+                        op_node = OperatorNode(
+                            operator_name=rid.get('op', 'equals'),
+                            field=rid.get('field'),
+                            target_value=rid.get('value')
+                        )
+                        rule_key = f"inline_{rid.get('field')}_{rid.get('op')}"
+                        msg_str = f"Inline rule on {rid.get('field')} failed"
+                    else:
+                        rule_key = str(rid).lower()
+                        rule = raw_rules.get(rule_key, {})
+                        
+                        op_node = OperatorNode(
+                            operator_name=rule.get('operator', 'equals'),
+                            field=rule.get('field'),
+                            target_value=rule.get('value')
+                        )
+                        
+                        msg = rule.get('message', '')
+                        msg_str = msg.get('en', str(msg)) if isinstance(msg, dict) else str(msg)
                     
                     cond_node = ConditionNode(
                         rule_id=rule_key,

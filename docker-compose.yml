@@ -1,6 +1,28 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: signpim
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  python-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.python
+    environment:
+      - DATABASE_URL=postgresql://postgres:postgres_password@postgres:5432/signpim
+    ports:
+      - "8000:8000"
+    depends_on:
+      - postgres
+
   backend:
     build: .
     ports:
@@ -8,6 +30,13 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3000
+      - PYTHON_ENGINE_URL=http://python-engine:8000
+      - DB_HOST=postgres
+      - DB_PASSWORD=postgres_password
+      - DB_NAME=signpim
+    depends_on:
+      - postgres
+      - python-engine
 
   nginx:
     image: nginx:alpine
@@ -19,3 +48,6 @@ services:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf
     depends_on:
       - backend
+
+volumes:
+  pgdata:

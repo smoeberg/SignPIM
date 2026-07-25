@@ -1,26 +1,40 @@
-import os
-import json
+import re
+import logging
+from typing import Dict, Any
+
+logger = logging.getLogger("GenericDBService")
+
+# Whitelist of valid table names to prevent SQL injection
+ALLOWED_TABLES = {"pim_products", "products", "tenant_products"}
 
 class GenericDBService:
-    def __init__(self, connection_string=None):
-        self.conn_str = connection_string or os.getenv("DATABASE_URL")
-        print("  [DB] Generic Storage Adapter initialized.")
+    def __init__(self, dsn: str = None):
+        self.dsn = dsn
 
-    def save_entity(self, table_name, fields_data, tenant_id):
-        """Dynamic, fully metadata-driven SQL generator. Knows NO domain entities."""
-        columns = list(fields_data.keys()) + ['tenant_id']
-        placeholders = ['%s'] * len(columns)
+    def sanitize_table_name(self, table_name: str) -> str:
+        clean_name = table_name.lower().strip()
+        if clean_name not in ALLOWED_TABLES:
+            # Fallback to safe default or regex check
+            if not re.match(r'^[a-zA-Z0-9_]+$', clean_name):
+                raise ValueError(f"Invalid table name: {table_name}")
+        return clean_name
+
+    def save_entity(self, table_name: str, payload: Dict[str, Any], tenant_id: str) -> bool:
+        clean_table = self.sanitize_table_name(table_name)
         
-        col_names = ", ".join(columns)
-        col_placeholders = ", ".join(placeholders)
+        cols = list(payload.keys()) + ["tenant_id"]
+        placeholders = ["%s"] * len(cols)
         
-        sql = f"INSERT INTO {table_name} ({col_names}) VALUES ({col_placeholders}) " \
-              f"ON CONFLICT (tenant_id) DO NOTHING;"
-              
-        values = [json.dumps(v) if isinstance(v, (dict, list)) else v for v in fields_data.values()]
-        values.append(tenant_id)
+        col_str = ", ".join(cols)
+        placeholder_str = ", ".join(placeholders)
         
-        print(f"  [STORAGE ADAPTER] Dynamic SQL Generated for Table '{table_name}':")
-        print(f"    Columns: {columns}")
-        print(f"    Tenant: {tenant_id}")
+        # Correct ON CONFLICT target: (sku, tenant_id)
+        sql = f"""
+            INSERT INTO {clean_table} ({col_str})
+            VALUES ({placeholder_str})
+            ON CONFLICT (sku, tenant_id) DO UPDATE SET
+            {', '.join([f"{col} = EXCLUDED.{col}" for col in payload.keys()])};
+        """
+        
+        logger.info(f"Executing Query against table [{clean_table}] for Tenant [{tenant_id}]")
         return True
