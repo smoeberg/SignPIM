@@ -16,8 +16,8 @@ def test_tenant_isolation_violation():
 
 def test_number_type_invalid_cast():
     handler = NumberType()
-    result = handler.cast_and_validate("invalid_number", {"type": "number"})
-    assert result == "invalid_number"  # Fallback gracefully
+    with pytest.raises(ValueError):
+        handler.cast_and_validate("invalid_number", {"type": "number"})
 
 def test_pure_graph_runtime_execution():
     runtime = PureGraphRuntime()
@@ -33,17 +33,17 @@ def test_pure_graph_runtime_execution():
                         ConditionNode(
                             rule_id="r1",
                             operator_node=OperatorNode(
-                                operator_name="equals",
-                                field="sku",
-                                target_value="TEST-1"
+                                operator_name="missing_images",
+                                field="images",
+                                target_value=None
                             ),
-                            message="SKU matches"
+                            message="Missing images"
                         )
                     ]
                 )
             )
         ]
     )
-    res = runtime.execute(graph, {}, {"sku": "TEST-1"}, tenant_id="TENANT_ALPHA")
+    res = runtime.execute(graph, {}, {"sku": "TEST-1", "images": []}, tenant_id="TENANT_ALPHA")
     assert res["tenant_id"] == "TENANT_ALPHA"
     assert "r1" in res["violations"]
