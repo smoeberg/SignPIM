@@ -1,29 +1,44 @@
-from pydantic import BaseModel
-from typing import List, Dict, Any
-
-class CompiledStepAST(BaseModel):
-    action: str
-    rules: List[Any] = []
-
-class CompiledWorkflowAST(BaseModel):
-    name: str
-    entity_name: str
-    execution_plan: List[CompiledStepAST]
+from typing import Dict, Any
+from meta.schemas.models import WorkflowSchema
+from engine.ast import WorkflowAST, ActionNode, ConditionNode, OperatorNode
 
 class SchemaCompiler:
     @staticmethod
-    def compile_workflow(workflow_schema, rules_meta) -> CompiledWorkflowAST:
-        """Compiles raw WorkflowSchema into an optimized Execution AST."""
-        plan = []
-        for step in workflow_schema.steps:
-            compiled_step = CompiledStepAST(
-                action=step.action,
-                rules=step.rules or []
+    def compile_workflow(raw_wf: Dict[str, Any], raw_rules: Dict[str, Any]) -> WorkflowAST:
+        wf_schema = WorkflowSchema(**raw_wf)
+        
+        actions = []
+        for step in wf_schema.steps:
+            conditions = []
+            if step.rules:
+                for rid in step.rules:
+                    rule_key = str(rid).lower()
+                    rule = raw_rules.get(rule_key, {})
+                    
+                    op_node = OperatorNode(
+                        operator_name=rule.get('operator', 'equals'),
+                        field=rule.get('field'),
+                        target_value=rule.get('value')
+                    )
+                    
+                    msg = rule.get('message', '')
+                    msg_str = msg.get('en', str(msg)) if isinstance(msg, dict) else str(msg)
+                    
+                    cond_node = ConditionNode(
+                        rule_id=rule_key,
+                        operator_node=op_node,
+                        message=msg_str
+                    )
+                    conditions.append(cond_node)
+
+            action_node = ActionNode(
+                action_type=step.action,
+                conditions=conditions
             )
-            plan.append(compiled_step)
-            
-        return CompiledWorkflowAST(
-            name=workflow_schema.name,
-            entity_name=workflow_schema.entity,
-            execution_plan=plan
+            actions.append(action_node)
+
+        return WorkflowAST(
+            name=wf_schema.name,
+            entity_name=wf_schema.entity or "Product",
+            actions=actions
         )

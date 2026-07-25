@@ -1,34 +1,40 @@
 from pydantic import BaseModel
-from typing import List, Any, Dict
+from typing import List, Dict, Any
+from engine.ast import WorkflowAST, ActionNode
 
-class ExecutionNode(BaseModel):
+class GraphNode(BaseModel):
     node_id: str
-    action: str
-    rules: List[Any] = []
-    depends_on: List[str] = []
+    action_node: ActionNode
+    dependencies: List[str] = []
 
 class ExecutionGraph(BaseModel):
     workflow_name: str
-    nodes: List[ExecutionNode]
+    entity_name: str
+    nodes: List[GraphNode]
+
+    def to_json(self) -> str:
+        return self.model_dump_json(indent=2)
+
+    @classmethod
+    def from_json(cls, json_str: str) -> "ExecutionGraph":
+        return cls.model_validate_json(json_str)
 
 class ExecutionPlanner:
     @staticmethod
-    def build_execution_graph(compiled_ast) -> ExecutionGraph:
-        """Converts Compiled Workflow AST into an executable Node Graph with explicit ordering."""
-        nodes = []
-        for idx, step in enumerate(compiled_ast.execution_plan):
-            node_id = f"node_{idx+1}_{step.action}"
-            depends = [f"node_{idx}_{compiled_ast.execution_plan[idx-1].action}"] if idx > 0 else []
+    def build_graph(ast: WorkflowAST) -> ExecutionGraph:
+        graph_nodes = []
+        for idx, action in enumerate(ast.actions):
+            node_id = f"node_{idx+1}_{action.action_type}"
+            deps = [graph_nodes[-1].node_id] if graph_nodes else []
             
-            node = ExecutionNode(
+            graph_nodes.append(GraphNode(
                 node_id=node_id,
-                action=step.action,
-                rules=step.rules,
-                depends_on=depends
-            )
-            nodes.append(node)
+                action_node=action,
+                dependencies=deps
+            ))
             
         return ExecutionGraph(
-            workflow_name=compiled_ast.name,
-            nodes=nodes
+            workflow_name=ast.name,
+            entity_name=ast.entity_name,
+            nodes=graph_nodes
         )
