@@ -1,18 +1,18 @@
 const { AppError } = require('../api/middleware/errorHandler');
 const { ERROR_CODES } = require('../constants/errors');
-const { PRODUCT_STATUS } = require('../constants/product');
 
 class ProductService {
   constructor(repository) {
     this.repository = repository;
-    this.productsMap = new Map(); // Local in-memory repository store fallback
+    this.productsMap = new Map();
   }
 
   async create(product) {
-    if (product.status === PRODUCT_STATUS.ACTIVE && (!product.images || !product.images.length)) {
-      throw new AppError('Active products must have at least one image', 400, ERROR_CODES.VALIDATION_ERROR);
+    // Status aligned with Product.yaml: [draft, ready, published]
+    if (product.status === 'ready' && (!product.images || !product.images.length)) {
+      throw new AppError('Ready products must have at least one image', 400, ERROR_CODES.VALIDATION_ERROR);
     }
-    if (this.repository) {
+    if (this.repository && typeof this.repository.save === 'function') {
       return this.repository.save(product);
     }
     this.productsMap.set(product.identifier || product.sku, product);

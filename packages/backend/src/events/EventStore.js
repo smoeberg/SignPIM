@@ -1,42 +1,46 @@
-const fs = require('fs');
+const fs = require('fs').promises;
 const path = require('path');
+const crypto = require('crypto');
 
 class EventStore {
   constructor(storagePath) {
-    this.storagePath = storagePath || path.join(__dirname, '../../data/events.json');
+    this.storagePath = storagePath || path.join(__dirname, '../../data/events.ndjson');
     this.ensureStorage();
   }
 
-  ensureStorage() {
+  async ensureStorage() {
     const dir = path.dirname(this.storagePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    if (!fs.existsSync(this.storagePath)) {
-      fs.writeFileSync(this.storagePath, JSON.stringify([]), 'utf8');
+    try {
+      await fs.mkdir(dir, { recursive: true });
+    } catch (e) {
+      // Directory exists
     }
   }
 
   async getAll() {
     try {
-      const data = fs.readFileSync(this.storagePath, 'utf8');
-      return JSON.parse(data);
+      const data = await fs.readFile(this.storagePath, 'utf8');
+      return data
+        .trim()
+        .split('\n')
+        .filter(line => line.length > 0)
+        .map(line => JSON.parse(line));
     } catch {
       return [];
     }
   }
 
   async publish(eventType, payload, metadata = {}) {
-    const events = await this.getAll();
+    await this.ensureStorage();
     const event = {
-      id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}`,
+      id: crypto.randomUUID(),
       eventType,
       payload,
       metadata,
       timestamp: new Date().toISOString()
     };
-    events.push(event);
-    fs.writeFileSync(this.storagePath, JSON.stringify(events, null, 2), 'utf8');
+    const line = JSON.stringify(event) + '\n';
+    await fs.appendFile(this.storagePath, line, 'utf8');
     return event;
   }
 }

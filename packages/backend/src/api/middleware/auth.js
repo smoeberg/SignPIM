@@ -3,9 +3,13 @@ const { AppError } = require('./errorHandler');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
-if (!JWT_SECRET && process.env.NODE_ENV === 'production') {
-  console.error("FATAL: JWT_SECRET environment variable is missing.");
-  process.exit(1);
+if (!JWT_SECRET) {
+  if (process.env.NODE_ENV === 'test') {
+    // Allowed for unit testing runner
+  } else {
+    console.error("FATAL: JWT_SECRET environment variable is missing.");
+    process.exit(1);
+  }
 }
 
 const authenticateToken = (req, res, next) => {

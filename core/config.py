@@ -5,7 +5,8 @@ import logging
 logger = logging.getLogger("ConfigValidator")
 
 REQUIRED_ENV_VARS = [
-    "DATABASE_URL"
+    "DATABASE_URL",
+    "JWT_SECRET"
 ]
 
 def validate_environment():
@@ -15,6 +16,6 @@ def validate_environment():
         if os.getenv("NODE_ENV") == "production":
             sys.exit(1)
         else:
-            logger.warning("Running in dev mode without DATABASE_URL; using mock DB service.")
+            logger.warning("Running in dev mode without required env vars.")
     else:
         logger.info("Environment configuration validated successfully.")

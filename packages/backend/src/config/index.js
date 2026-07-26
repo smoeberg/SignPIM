@@ -1,4 +1,4 @@
-const requiredEnv = ['DB_HOST', 'DB_PASSWORD', 'DB_NAME', 'REDIS_HOST'];
+const requiredEnv = ['DB_HOST', 'DB_PASSWORD', 'DB_NAME', 'REDIS_HOST', 'JWT_SECRET'];
 const missing = requiredEnv.filter(key => !process.env[key]);
 
 if (process.env.NODE_ENV === 'production' && missing.length > 0) {
