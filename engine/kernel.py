@@ -34,6 +34,18 @@ class PlatformKernel:
             self.compiled_graphs[k.lower()] = graph
             self.compiled_graphs[ast.name.lower()] = graph
 
+        # Attach rule metadata (for severity-based scoring) and scoring config
+        # so the runtime's 'calculate' action can work with real rule data.
+        rule_meta_map = {
+            rid: rdata for rid, rdata in self.raw_meta['rules'].items()
+            if isinstance(rdata, dict)
+        }
+        scoring_config = rule_meta_map.get('quality_weights', {})
+        self._rule_meta = rule_meta_map
+        self._scoring = {
+            k: float(v) for k, v in scoring_config.get('weights', {}).items()
+        } if scoring_config.get('weights') else None
+
         logger.info(f"PlatformKernel: Successfully compiled {len(self.compiled_graphs)} Execution Graphs.")
 
     def run_workflow(self, workflow_name: str, payload: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
@@ -42,4 +54,7 @@ class PlatformKernel:
             raise ValueError(f"ExecutionGraph for workflow '{workflow_name}' not found.")
         
         entity_meta = self.compiled_entities.get(graph.entity_name.lower())
-        return self.runtime.execute(graph, entity_meta, payload, tenant_id)
+        if entity_meta is not None:
+            entity_meta = dict(entity_meta)
+            entity_meta['_rule_meta'] = self._rule_meta
+        return self.runtime.execute(graph, entity_meta, payload, tenant_id, scoring=self._scoring)

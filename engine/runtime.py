@@ -10,23 +10,22 @@ class PureGraphRuntime:
     def __init__(self, repository: Optional[Any] = None) -> None:
         self.repo = repository
 
-    def execute(self, graph: ExecutionGraph, entity_meta: Dict[str, Any], data: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    def execute(self, graph: ExecutionGraph, entity_meta: Dict[str, Any], data: Dict[str, Any], tenant_id: str, scoring: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
         if not tenant_id:
             raise PermissionError("Tenant ID is strictly required for isolation.")
 
         logger.info(f"Executing Graph '{graph.workflow_name}' ({len(graph.nodes)} Nodes) for Tenant: {tenant_id}")
 
-        typed_payload: Dict[str, Any] = {}
+        # Fix Bug 1: preserve ALL input fields (undeclared fields like 'images'
+        # must survive into the pipeline), then apply declared type-casts on top.
+        typed_payload: Dict[str, Any] = dict(data)
         if entity_meta and 'fields' in entity_meta:
             for f_name, f_def in entity_meta['fields'].items():
-                val = data.get(f_name)
                 t_handler = TypeRegistry.get(f_def['type'])
                 if t_handler:
-                    typed_payload[f_name] = t_handler.cast_and_validate(val, f_def)
+                    typed_payload[f_name] = t_handler.cast_and_validate(data.get(f_name), f_def)
                 else:
-                    typed_payload[f_name] = val
-        else:
-            typed_payload = data
+                    typed_payload[f_name] = data.get(f_name)
 
         ctx = {"data": typed_payload, "violations": [], "tenant_id": tenant_id}
 
@@ -50,6 +49,20 @@ class PureGraphRuntime:
                     if op.operator_name == 'multiply' and op.field in ctx['data']:
                         ctx['data'][op.field] = ctx['data'][op.field] * float(op.target_value)
                         logger.info(f"Transformed field [{op.field}] using operator multiply: {ctx['data'][op.field]}")
+
+            elif action.action_type == 'calculate':
+                # Fix Bug 2: implement the scoring step.
+                w = scoring or {'completeness': 0.4, 'consistency': 0.4, 'accuracy': 0.2}
+                if sum(w.values()) > 0:
+                    w = {k: v / sum(w.values()) for k, v in w.items()}
+                # Severity-based deductions against a perfect 100 score.
+                SEVERITY_DEDUCTION = {'critical': 25.0, 'major': 15.0, 'minor': 5.0, 'info': 1.0}
+                deduction = 0.0
+                for rule_id in ctx['violations']:
+                    rule_meta = (entity_meta or {}).get('_rule_meta', {}).get(rule_id, {})
+                    deduction += SEVERITY_DEDUCTION.get(rule_meta.get('severity', 'major'), 15.0)
+                ctx['data']['quality_score'] = round(max(0.0, 100.0 - deduction), 2)
+                logger.info(f"Calculated quality_score: {ctx['data']['quality_score']} (violations: {ctx['violations']})")
 
             elif action.action_type == 'persist':
                 if self.repo and entity_meta:
