@@ -136,6 +136,24 @@ def test_cross_tenant_feed_poll_blocked(two_tenants):
     assert c.post("/feeds/other/poll").status_code in (403, 422)  # 422 = missing required body, still no tenant access
 
 
+def test_cross_tenant_config_rules_and_mappings_blocked(two_tenants):
+    c, ta, tb = two_tenants
+    assert c.get("/admin/config", params={"tenant": "other"}).status_code == 403
+    assert c.put("/admin/config/llm.provider", params={"tenant": "other"},
+                 json={"value": "mock"}).status_code == 403
+    assert c.post("/rules", params={"tenant": "other"},
+                  json={"rule_id": "foreign"}).status_code == 403
+    assert c.post("/mappings", params={"tenant": "other"}, json={
+        "source_value": "x", "normalized": "y", "field": "name"}).status_code == 403
+
+
+def test_tenant_admin_cannot_create_global_rule(two_tenants):
+    c, ta, tb = two_tenants
+    response = c.post("/rules", params={"tenant": "acme"}, json={
+        "rule_id": "global-takeover", "global_rule": True})
+    assert response.status_code == 403
+
+
 def test_reader_key_same_tenant_isolation(two_tenants):
     c, ta, tb = two_tenants
     reader = AuthService(app_mod.persistence).create_key(ta, "r", "reader")["key"]

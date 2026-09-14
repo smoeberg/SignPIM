@@ -28,6 +28,8 @@ logger = logging.getLogger("signpim.api")
 from fastapi import Header
 from core.auth import AuthService, UserService, ROLE_SCOPES
 from core.models import Tenant as _TenantModel  # noqa
+# Import SaaS models before PersistenceService.create_all() runs.
+from core.saas_auth import SaaSAuthService, OrganizationMembership, Account  # noqa
 
 _auth: AuthService = None
 _users: "UserService" = None
@@ -105,7 +107,9 @@ def require_scope(scope: str):
     def dep(request: "Request", auth: AuthService = Depends(get_auth)):
         header = request.headers.get("Authorization", "")
         try:
-            if "spimsess_" in header:
+            if "spimsaas_" in header:
+                info = SaaSAuthService(persistence).authenticate(header.replace("Bearer ", ""))
+            elif "spimsess_" in header:
                 info = get_users().authenticate_session(header.replace("Bearer ", ""))
             else:
                 info = auth.authenticate(header)
@@ -113,6 +117,22 @@ def require_scope(scope: str):
             raise HTTPException(status_code=401, detail=str(e))
         if scope not in info["scopes"]:
             raise HTTPException(status_code=403, detail=f"Missing scope: {scope}")
+        request.state.auth = info
+        return info
+    return dep
+
+
+def require_platform(*roles: str):
+    """Authenticate a SaaS session and require an explicit provider-side role."""
+    allowed = set(roles)
+    def dep(request: "Request"):
+        token = request.headers.get("Authorization", "").replace("Bearer ", "")
+        try:
+            info = SaaSAuthService(persistence).authenticate(token)
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        if not allowed.intersection(info.get("platform_roles", [])):
+            raise HTTPException(status_code=403, detail="Platform role required")
         request.state.auth = info
         return info
     return dep
@@ -620,9 +640,13 @@ def quality_summary(slug: str,
 def add_rule(rule: RuleIn, tenant: str = "default",
              persistence: PersistenceService = Depends(get_persistence),
              info: dict = Depends(require_scope("rules:write"))):
+    _enforce_tenant(info, tenant)
+    if rule.global_rule:
+        raise HTTPException(status_code=403,
+                            detail="Global rules require the platform API")
     t = persistence.get_or_create_tenant(tenant)
     return persistence.add_rule(
-        None if rule.global_rule else t.id,
+        t.id,
         rule.rule_id, rule.category, rule.severity, rule.parameters,
     )
 
@@ -631,6 +655,7 @@ def add_rule(rule: RuleIn, tenant: str = "default",
 def add_mapping(mapping: MappingIn, tenant: str = "default",
                 persistence: PersistenceService = Depends(get_persistence),
                 info: dict = Depends(require_scope("mappings:write"))):
+    _enforce_tenant(info, tenant)
     t = persistence.get_or_create_tenant(tenant)
     return persistence.add_mapping(t.id, mapping.source_value, mapping.normalized, mapping.field)
 
@@ -654,6 +679,7 @@ def admin_list_config(tenant: str = "default",
                       info: dict = Depends(require_scope("keys:manage"))):
     """List all config entries for a tenant. Secrets masked."""
     _require_admin(info)
+    _enforce_tenant(info, tenant)
     t = persistence.get_or_create_tenant(tenant)
     return _cfg_service(persistence).list_keys(t.id)
 
@@ -664,6 +690,7 @@ def admin_effective_config(tenant: str = "default",
                            info: dict = Depends(require_scope("keys:manage"))):
     """Full resolution view: tenant DB > global DB > env, with sources shown."""
     _require_admin(info)
+    _enforce_tenant(info, tenant)
     t = persistence.get_or_create_tenant(tenant)
     return _cfg_service(persistence).effective(t.id)
 
@@ -674,12 +701,13 @@ def admin_set_config(key: str, body: dict, tenant: str = "default",
                      info: dict = Depends(require_scope("keys:manage"))):
     """Set a config key. Secrets are encrypted at rest (requires SIGNPIM_SECRET_KEY)."""
     _require_admin(info)
+    _enforce_tenant(info, tenant)
     if "value" not in body:
         raise HTTPException(status_code=422, detail="body must contain 'value'")
     t = persistence.get_or_create_tenant(tenant)
     try:
         return _cfg_service(persistence).set(
-            key, body["value"], tenant_id=body.get("global") and None or t.id,
+            key, body["value"], tenant_id=t.id,
             updated_by=info.get("user", {}).get("email"))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -692,8 +720,164 @@ def admin_delete_config(key: str, tenant: str = "default",
                         persistence: PersistenceService = Depends(get_persistence),
                         info: dict = Depends(require_scope("keys:manage"))):
     _require_admin(info)
+    _enforce_tenant(info, tenant)
     t = persistence.get_or_create_tenant(tenant)
     ok = _cfg_service(persistence).delete(key, tenant_id=t.id)
     if not ok:
         raise HTTPException(status_code=404, detail="Config key not found")
     return {"deleted": key}
+
+
+# ============ SaaS platform / organization API (v2 identity) ============
+class SaaSLoginIn(BaseModel):
+    email: str
+    password: str
+    organization: Optional[str] = None
+
+
+class OrganizationIn(BaseModel):
+    slug: str = Field(min_length=2, max_length=64, pattern=r"^[a-z0-9][a-z0-9-]*$")
+
+
+class OrganizationMemberIn(BaseModel):
+    email: str
+    password: str = Field(min_length=8)
+    role: str = "reader"
+    display_name: Optional[str] = None
+
+
+@app.post("/auth/saas/login", tags=["auth"])
+def saas_login(body: SaaSLoginIn,
+               persistence: PersistenceService = Depends(get_persistence)):
+    """Login for global accounts; optionally select an organization context."""
+    try:
+        return SaaSAuthService(persistence).login(
+            body.email, body.password, body.organization)
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.get("/platform/organizations", tags=["platform"])
+def platform_list_organizations(
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_platform("platform_owner", "platform_admin", "support"))):
+    from sqlalchemy import select
+    with persistence.session() as s:
+        rows = s.scalars(select(_TenantModel).order_by(_TenantModel.slug)).all()
+        return [{"id": row.id, "slug": row.slug,
+                 "created_at": row.created_at.isoformat()} for row in rows]
+
+
+@app.get("/platform/config", tags=["platform"])
+def platform_list_config(
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_platform("platform_owner", "platform_admin", "operations"))):
+    return _cfg_service(persistence).list_keys(None)
+
+
+@app.put("/platform/config/{key}", tags=["platform"])
+def platform_set_config(
+        key: str, body: dict,
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_platform("platform_owner", "platform_admin"))):
+    if "value" not in body:
+        raise HTTPException(status_code=422, detail="body must contain 'value'")
+    try:
+        result = _cfg_service(persistence).set(
+            key, body["value"], tenant_id=None, updated_by=info.get("email"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    SaaSAuthService(persistence).audit(info["account_id"], "platform.config.set",
+                                       target=key)
+    return result
+
+
+@app.delete("/platform/config/{key}", tags=["platform"])
+def platform_delete_config(
+        key: str,
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_platform("platform_owner", "platform_admin"))):
+    if not _cfg_service(persistence).delete(key, tenant_id=None):
+        raise HTTPException(status_code=404, detail="Config key not found")
+    SaaSAuthService(persistence).audit(info["account_id"], "platform.config.delete",
+                                       target=key)
+    return {"deleted": key}
+
+
+@app.post("/platform/organizations", tags=["platform"])
+def platform_create_organization(
+        body: OrganizationIn,
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_platform("platform_owner", "platform_admin"))):
+    from sqlalchemy import select
+    with persistence.session() as s:
+        if s.scalar(select(_TenantModel).where(_TenantModel.slug == body.slug)):
+            raise HTTPException(status_code=409, detail="Organization already exists")
+        row = _TenantModel(slug=body.slug, settings={})
+        s.add(row); s.flush()
+        result = {"id": row.id, "slug": row.slug}
+    SaaSAuthService(persistence).audit(info["account_id"], "organization.create",
+                                       result["id"], result["slug"])
+    return result
+
+
+def _organization_by_slug(persistence: PersistenceService, slug: str):
+    from sqlalchemy import select
+    with persistence.session() as s:
+        row = s.scalar(select(_TenantModel).where(_TenantModel.slug == slug))
+        if row is None:
+            raise HTTPException(status_code=404, detail="Organization not found")
+        return row
+
+
+def _add_saas_member(persistence: PersistenceService, organization_id: str,
+                     body: OrganizationMemberIn):
+    service = SaaSAuthService(persistence)
+    try:
+        account = service.create_account(body.email, body.password, body.display_name)
+        return service.add_membership(account.id, organization_id, body.role)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/platform/organizations/{slug}/members", tags=["platform"])
+def platform_add_organization_member(
+        slug: str, body: OrganizationMemberIn,
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_platform("platform_owner", "platform_admin"))):
+    organization = _organization_by_slug(persistence, slug)
+    result = _add_saas_member(persistence, organization.id, body)
+    SaaSAuthService(persistence).audit(info["account_id"], "membership.create",
+                                       organization.id, body.email.lower())
+    return result
+
+
+@app.get("/organization/members", tags=["organization"])
+def organization_members(
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_scope("keys:manage"))):
+    if not info.get("account_id") or not info.get("organization_id"):
+        raise HTTPException(status_code=403, detail="SaaS organization session required")
+    from sqlalchemy import select
+    with persistence.session() as s:
+        rows = s.execute(select(OrganizationMembership, Account).join(
+            Account, Account.id == OrganizationMembership.account_id).where(
+            OrganizationMembership.organization_id == info["organization_id"])).all()
+        return [{"account_id": account.id, "email": account.email,
+                 "display_name": account.display_name, "role": membership.role,
+                 "active": membership.active} for membership, account in rows]
+
+
+@app.post("/organization/members", tags=["organization"])
+def organization_add_member(
+        body: OrganizationMemberIn,
+        persistence: PersistenceService = Depends(get_persistence),
+        info: dict = Depends(require_scope("keys:manage"))):
+    if not info.get("account_id") or not info.get("organization_id"):
+        raise HTTPException(status_code=403, detail="SaaS organization session required")
+    result = _add_saas_member(persistence, info["organization_id"], body)
+    SaaSAuthService(persistence).audit(info["account_id"], "membership.create",
+                                       info["organization_id"], body.email.lower())
+    return result
