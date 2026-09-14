@@ -15,12 +15,7 @@ from sqlalchemy.orm import declarative_base, relationship
 Base = declarative_base()
 
 
-def _uuid() -> str:
-    return str(uuid.uuid4())
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
+from core._orm import _uuid, _now  # noqa: F401
 
 
 class Tenant(Base):

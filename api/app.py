@@ -13,7 +13,7 @@ Endpoints:
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from core.persistence import PersistenceService
@@ -21,6 +21,18 @@ from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 
 logger = logging.getLogger("signpim.api")
+
+from fastapi import Header
+from core.auth import AuthService, ROLE_SCOPES
+from core.models import Tenant as _TenantModel  # noqa
+
+_auth: AuthService = None  # set in startup fixture/tests via app.state
+
+
+def get_auth() -> AuthService:
+    from fastapi import Request
+    # placeholder replaced below
+    raise NotImplementedError
 
 app = FastAPI(title="SignPIM", version="0.1.0",
               description="Feed-First & Headless PIM for complex supplier data")
@@ -36,6 +48,27 @@ ingestion = CSVIngestionService(persistence, kernel)
 
 def get_persistence() -> PersistenceService:
     return persistence
+
+
+def get_auth() -> AuthService:
+    global _auth
+    if _auth is None:
+        _auth = AuthService(persistence)
+    return _auth
+
+
+def require_scope(scope: str):
+    """FastAPI dependency: authenticate + enforce scope."""
+    def dep(request: "Request", auth: AuthService = Depends(get_auth)):
+        try:
+            info = auth.authenticate(request.headers.get("Authorization", ""))
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        if scope not in info["scopes"]:
+            raise HTTPException(status_code=403, detail=f"Missing scope: {scope}")
+        request.state.auth = info
+        return info
+    return dep
 
 
 # ---------- schemas ----------
@@ -74,8 +107,11 @@ def health():
 
 # ---------- ingestion ----------
 @app.post("/tenants/{slug}/ingest", tags=["ingestion"])
-def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv")):
+def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv"),
+               info: dict = Depends(require_scope("ingest:write"))):
     """Ingest a raw supplier CSV feed for a tenant (Feed-First front door)."""
+    if slug != _slug_of(info):
+        raise HTTPException(status_code=403, detail="Key not valid for this tenant")
     try:
         result = ingestion.ingest(body, slug)
     except IngestionError as e:
@@ -86,7 +122,8 @@ def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv")):
 # ---------- products ----------
 @app.post("/products", tags=["products"])
 def upsert_product(product: ProductIn, tenant: str = "default",
-                   persistence: PersistenceService = Depends(get_persistence)):
+                   persistence: PersistenceService = Depends(get_persistence),
+                   info: dict = Depends(require_scope("products:write"))):
     """Upsert a single product through the full_sync engine workflow."""
     data = product.model_dump(exclude_none=True)
     result = kernel.run_workflow("full_sync", data, tenant_id=tenant)
@@ -100,7 +137,8 @@ def upsert_product(product: ProductIn, tenant: str = "default",
 
 @app.get("/products/{sku}", tags=["products"])
 def get_product(sku: str, tenant: str = "default",
-                persistence: PersistenceService = Depends(get_persistence)):
+                persistence: PersistenceService = Depends(get_persistence),
+                info: dict = Depends(require_scope("products:read"))):
     t = persistence.get_or_create_tenant(tenant)
     p = persistence.get_product(t.id, sku)
     if p is None:
@@ -111,15 +149,66 @@ def get_product(sku: str, tenant: str = "default",
 @app.get("/products", tags=["products"])
 def list_products(tenant: str = "default", min_score: Optional[float] = Query(None, ge=0, le=100),
                   limit: int = Query(100, ge=1, le=1000), offset: int = Query(0, ge=0),
-                  persistence: PersistenceService = Depends(get_persistence)):
+                  persistence: PersistenceService = Depends(get_persistence),
+                  info: dict = Depends(require_scope("products:read"))):
     t = persistence.get_or_create_tenant(tenant)
     return persistence.list_products(t.id, min_score=min_score, limit=limit, offset=offset)
+
+
+# ---------- key management ----------
+@app.post("/keys", tags=["keys"])
+def create_key(name: str = Query(...), role: str = Query("reader"),
+               tenant: str = "default",
+               persistence: PersistenceService = Depends(get_persistence),
+               info: dict = Depends(require_scope("keys:manage"))):
+    """Create an API key for the caller's tenant. Plaintext shown exactly once."""
+    t = persistence.get_or_create_tenant(tenant)
+    if info["tenant_id"] != t.id:
+        raise HTTPException(status_code=403, detail="Key not valid for this tenant")
+    return get_auth().create_key(t.id, name, role)
+
+
+@app.get("/keys", tags=["keys"])
+def list_keys(tenant: str = "default",
+              persistence: PersistenceService = Depends(get_persistence),
+              info: dict = Depends(require_scope("keys:manage"))):
+    t = persistence.get_or_create_tenant(tenant)
+    if info["tenant_id"] != t.id:
+        raise HTTPException(status_code=403, detail="Key not valid for this tenant")
+    return get_auth().list_keys(t.id)
+
+
+@app.delete("/keys/{key_id}", tags=["keys"])
+def revoke_key(key_id: str, tenant: str = "default",
+               persistence: PersistenceService = Depends(get_persistence),
+               info: dict = Depends(require_scope("keys:manage"))):
+    t = persistence.get_or_create_tenant(tenant)
+    if info["tenant_id"] != t.id:
+        raise HTTPException(status_code=403, detail="Key not valid for this tenant")
+    ok = get_auth().revoke_key(t.id, key_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Key not found")
+    return {"revoked": key_id}
+
+
+def _enforce_tenant(info: dict, slug: str):
+    if slug != _slug_of(info):
+        raise HTTPException(status_code=403, detail="Key not valid for this tenant")
+
+
+def _slug_of(info: dict) -> str:
+    from core.models import Tenant as T
+    from sqlalchemy import select
+    with persistence.session() as s:
+        t = s.get(T, info["tenant_id"])
+        return t.slug if t else info["tenant_id"]
 
 
 # ---------- quality ----------
 @app.get("/quality/{slug}", tags=["quality"])
 def quality_summary(slug: str,
-                    persistence: PersistenceService = Depends(get_persistence)):
+                    persistence: PersistenceService = Depends(get_persistence),
+                    info: dict = Depends(require_scope("quality:read"))):
     """Tenant-level 3D quality summary: completeness / consistency / accuracy."""
     t = persistence.get_or_create_tenant(slug)
     products = persistence.list_products(t.id, limit=100000)
@@ -137,7 +226,8 @@ def quality_summary(slug: str,
 # ---------- rules & mappings ----------
 @app.post("/rules", tags=["governance"])
 def add_rule(rule: RuleIn, tenant: str = "default",
-             persistence: PersistenceService = Depends(get_persistence)):
+             persistence: PersistenceService = Depends(get_persistence),
+             info: dict = Depends(require_scope("rules:write"))):
     t = persistence.get_or_create_tenant(tenant)
     return persistence.add_rule(
         None if rule.global_rule else t.id,
@@ -147,6 +237,7 @@ def add_rule(rule: RuleIn, tenant: str = "default",
 
 @app.post("/mappings", tags=["governance"])
 def add_mapping(mapping: MappingIn, tenant: str = "default",
-                persistence: PersistenceService = Depends(get_persistence)):
+                persistence: PersistenceService = Depends(get_persistence),
+                info: dict = Depends(require_scope("mappings:write"))):
     t = persistence.get_or_create_tenant(tenant)
     return persistence.add_mapping(t.id, mapping.source_value, mapping.normalized, mapping.field)

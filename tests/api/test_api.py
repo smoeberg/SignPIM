@@ -10,10 +10,17 @@ from services.ingestion import CSVIngestionService
 @pytest.fixture()
 def client():
     app_mod.persistence = PersistenceService()
+    app_mod._auth = None
     app_mod.kernel = PlatformKernel(meta_dir="meta")
     app_mod.kernel.bootstrap()
     app_mod.ingestion = CSVIngestionService(app_mod.persistence, app_mod.kernel)
-    return TestClient(app_mod.app)
+    c = TestClient(app_mod.app)
+    # bootstrap an admin key for this test tenant
+    from core.auth import AuthService
+    t = app_mod.persistence.get_or_create_tenant("acme")
+    out = AuthService(app_mod.persistence).create_key(t.id, "test-admin", role="admin")
+    c.headers.update({"Authorization": f"Bearer {out['key']}"})
+    return c
 
 from engine.kernel import PlatformKernel
 
@@ -38,13 +45,13 @@ def test_ingest_full_pipeline(client):
 
 
 def test_ingest_missing_columns_422(client):
-    r = client.post("/tenants/x/ingest", params={"body": CSV_MISSING_COLS})
+    r = client.post("/tenants/acme/ingest", params={"body": CSV_MISSING_COLS})
     assert r.status_code == 422
     assert "Missing required columns" in r.json()["detail"]
 
 
 def test_ingest_bad_numeric_422(client):
-    r = client.post("/tenants/x/ingest", params={"body": CSV_BAD_PRICE})
+    r = client.post("/tenants/acme/ingest", params={"body": CSV_BAD_PRICE, "tenant": "acme"})
     assert r.status_code == 422
     assert "not numeric" in r.json()["detail"]
 
@@ -73,8 +80,8 @@ def test_get_product_404(client):
 
 
 def test_quality_endpoint_3d(client):
-    client.post("/tenants/qco/ingest", params={"body": CSV_FEED})
-    r = client.get("/quality/qco")
+    client.post("/tenants/acme/ingest", params={"body": CSV_FEED})
+    r = client.get("/quality/acme")
     assert r.status_code == 200
     dims = r.json()["by_dimension"]
     assert set(dims) == {"completeness", "consistency", "accuracy"}
@@ -98,7 +105,7 @@ def test_rules_and_mappings(client):
 
 
 def test_persistence_quality_persisted_after_ingest(client):
-    client.post("/tenants/pq/ingest", params={"body": CSV_FEED})
-    r = client.get("/products/GOOD-1", params={"tenant": "pq"})
+    client.post("/tenants/acme/ingest", params={"body": CSV_FEED})
+    r = client.get("/products/GOOD-1", params={"tenant": "acme"})
     assert r.status_code == 200
     assert r.json()["quality_score"] is not None
