@@ -44,7 +44,11 @@ python pilot/setup_pilot.py                                # idempotent — tryg
 ## SFTP-skift når leverandøren er klar
 ```python
 imp = SFTPFeedImporter(persistence, ingestion)
-imp.poll("bygmarked-as", host="ftp.leverandoer.dk", remote_dir="/out",
+# Live SFTP: configure env vars, then:
+#   POST /feeds/bygmarked-as/poll?mode=sftp
+# env: SIGNPIM_SFTP_HOST / SIGNPIM_SFTP_PORT / SIGNPIM_SFTP_USER /
+#      SIGNPIM_SFTP_PASSWORD | SIGNPIM_SFTP_KEY_PATH / SIGNPIM_SFTP_REMOTE_DIR
+# (credentials never travel through the API request body)
          username="signpim", password="...")
 ```
 API: `POST /feeds/{slug}/poll` — samme checksum-idempotens.

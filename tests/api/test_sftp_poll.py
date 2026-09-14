@@ -10,7 +10,7 @@ from services.ingestion import CSVIngestionService
 from services.feed_import import SFTPFeedImporter
 from engine.kernel import PlatformKernel
 
-CSV = "sku;navn;pris\nP-9;Vaterpas;129,50\n"
+CSV = "sku,name,price\nP-9,Vaterpas,129.50\n"
 
 
 @pytest.fixture()
@@ -37,7 +37,7 @@ class _FakeSFTP:
             a = A(); a.filename = name; a.st_size = len(content); a.st_mtime = 1.0
             out.append(a)
         return out
-    def open(self, path):
+    def open(self, path, mode="r"):
         import io
         name = path.rsplit("/", 1)[-1]
         return io.BytesIO(self._files[name].encode())
@@ -77,10 +77,10 @@ def test_sftp_poll_ingests_and_is_idempotent(env, monkeypatch):
     r2 = env.post("/feeds/acme/poll", params={"mode": "sftp"}).json()
     assert r2["files"][0]["skipped"] is True
     # changed file → re-ingest
-    fake.files["leverandoer_a_uge38.csv"] = CSV + "P-10;Savklinge;49,00\n"
+    fake.files["leverandoer_a_uge38.csv"] = CSV + "P-10,Savklinge,49.00\n"
     r3 = env.post("/feeds/acme/poll", params={"mode": "sftp"}).json()
     assert r3["files"][0]["skipped"] is False
-    assert r3["files"][0]["rows_ingested"] == 1
+    assert r3["files"][0]["rows_ingested"] == 2
 
 
 def test_sftp_poll_isolated_per_tenant(env, monkeypatch):

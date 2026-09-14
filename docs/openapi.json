@@ -1304,7 +1304,7 @@
           "feeds"
         ],
         "summary": "Poll Feed",
-        "description": "Poll a local feed directory for new/changed supplier CSVs (SFTP variant available via services.feed_import.SFTPFeedImporter).",
+        "description": "Poll a feed directory for new/changed supplier CSVs.\n\nmode=local: directory from query param.\nmode=sftp: host/port/username/credentials come from environment\n(SIGNPIM_SFTP_HOST, SIGNPIM_SFTP_PORT, SIGNPIM_SFTP_USER,\nSIGNPIM_SFTP_PASSWORD, SIGNPIM_SFTP_KEY_PATH) — never from the request body.",
         "operationId": "poll_feed_feeds__slug__poll_post",
         "parameters": [
           {
@@ -1317,15 +1317,26 @@
             }
           },
           {
-            "name": "directory",
+            "name": "mode",
             "in": "query",
-            "required": true,
+            "required": false,
             "schema": {
               "type": "string",
-              "description": "Local directory with CSV feeds",
+              "pattern": "^(local|sftp)$",
+              "default": "local",
+              "title": "Mode"
+            }
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Local directory (mode=local)",
               "title": "Directory"
             },
-            "description": "Local directory with CSV feeds"
+            "description": "Local directory (mode=local)"
           }
         ],
         "responses": {
