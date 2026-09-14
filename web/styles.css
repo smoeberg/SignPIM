@@ -36,3 +36,9 @@ main { display: grid; gap: 1rem; grid-template-columns: 320px 1fr; }
 #ingest-result { background: #11151b; padding: .6rem; border-radius: 6px; font-size: .8rem;
   max-height: 260px; overflow: auto; white-space: pre-wrap; }
 @media (max-width: 800px) { main { grid-template-columns: 1fr; } }
+
+.hidden { display: none !important; }
+.login-panel { position: fixed; top: 70px; right: 1rem; z-index: 10; width: 320px;
+  display: grid; gap: .5rem; }
+.login-panel label { font-size: .85rem; color: var(--muted); display: grid; gap: .25rem; }
+.whoami { color: var(--muted); font-size: .85rem; }

@@ -2,7 +2,7 @@
 const $ = (id) => document.getElementById(id);
 
 function headers() {
-  const key = $('apikey').value.trim();
+  const key = $('apikey').value.trim() || sessionStorage.getItem('spim_token') || '';
   return key ? { Authorization: `Bearer ${key}` } : {};
 }
 
@@ -72,7 +72,49 @@ $('ingest-btn').onclick = async () => {
   });
   const j = await res.json();
   $('ingest-result').textContent = JSON.stringify(j, null, 2);
+  // ---------- login / logout ----------
+$('login-toggle').onclick = () => $('login-panel').classList.toggle('hidden');
+
+$('login-btn').onclick = async () => {
+  const res = await fetch(`/auth/login?tenant=${tenant()}&email=${encodeURIComponent($('login-email').value)}&password=${encodeURIComponent($('login-password').value)}`, { method: 'POST' });
+  const j = await res.json();
+  if (res.ok) {
+    sessionStorage.setItem('spim_token', j.token);
+    sessionStorage.setItem('spim_user', JSON.stringify(j.user));
+    $('login-result').classList.add('hidden');
+    $('login-panel').classList.add('hidden');
+    $('login-btn').classList.add('hidden');
+    $('logout-btn').classList.remove('hidden');
+    $('login-toggle').textContent = j.user.email;
+    $('whoami').textContent = `${j.user.display_name || j.user.email} (${j.user.role})`;
+    loadAll();
+  } else {
+    $('login-result').classList.remove('hidden');
+    $('login-result').textContent = j.detail || 'Login fejlede';
+  }
+};
+
+$('logout-btn').onclick = async () => {
+  await fetch('/auth/logout', { method: 'POST', headers: headers() });
+  sessionStorage.removeItem('spim_token');
+  sessionStorage.removeItem('spim_user');
+  $('whoami').textContent = '';
+  $('logout-btn').classList.add('hidden');
+  $('login-btn').classList.remove('hidden');
+  $('login-toggle').textContent = 'Log ind';
   loadAll();
+};
+
+// restore session on load
+(function restore() {
+  const user = sessionStorage.getItem('spim_user');
+  if (user) {
+    const u = JSON.parse(user);
+    $('whoami').textContent = `${u.display_name || u.email} (${u.role})`;
+    $('login-toggle').textContent = u.email;
+  }
+  loadAll();
+})();
 };
 
 loadAll();

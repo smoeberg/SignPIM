@@ -25,10 +25,11 @@ from services.ingestion import CSVIngestionService, IngestionError
 logger = logging.getLogger("signpim.api")
 
 from fastapi import Header
-from core.auth import AuthService, ROLE_SCOPES
+from core.auth import AuthService, UserService, ROLE_SCOPES
 from core.models import Tenant as _TenantModel  # noqa
 
-_auth: AuthService = None  # set in startup fixture/tests via app.state
+_auth: AuthService = None
+_users: "UserService" = None
 
 
 def get_auth() -> AuthService:
@@ -59,11 +60,22 @@ def get_auth() -> AuthService:
     return _auth
 
 
+def get_users() -> "UserService":
+    global _users
+    if _users is None:
+        _users = UserService(persistence)
+    return _users
+
+
 def require_scope(scope: str):
     """FastAPI dependency: authenticate + enforce scope."""
     def dep(request: "Request", auth: AuthService = Depends(get_auth)):
+        header = request.headers.get("Authorization", "")
         try:
-            info = auth.authenticate(request.headers.get("Authorization", ""))
+            if "spimsess_" in header:
+                info = get_users().authenticate_session(header.replace("Bearer ", ""))
+            else:
+                info = auth.authenticate(header)
         except PermissionError as e:
             raise HTTPException(status_code=401, detail=str(e))
         if scope not in info["scopes"]:
@@ -98,6 +110,80 @@ class MappingIn(BaseModel):
     source_value: str
     normalized: str
     field: str
+
+
+# ---------- auth (users & sessions) ----------
+@app.post("/auth/login", tags=["auth"])
+def login(tenant: str = Query(...), email: str = Query(...), password: str = Query(...)):
+    """Password login. Returns a session token (Bearer spimsess_...)."""
+    try:
+        return get_users().login(tenant, email, password)
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.post("/auth/logout", tags=["auth"])
+def logout(request: Request):
+    token = request.headers.get("Authorization", "").replace("Bearer ", "")
+    ok = get_users().logout(token)
+    if not ok:
+        raise HTTPException(status_code=401, detail="Invalid session")
+    return {"logged_out": True}
+
+
+@app.get("/auth/me", tags=["auth"])
+def me(request: Request, auth: AuthService = Depends(get_auth)):
+    header = request.headers.get("Authorization", "")
+    try:
+        if "spimsess_" in header:
+            return get_users().authenticate_session(header.replace("Bearer ", ""))
+        return auth.authenticate(header)
+    except PermissionError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.post("/users", tags=["users"])
+def create_user(email: str = Query(...), password: str = Query(...),
+                role: str = Query("reader"), display_name: str = Query(None),
+                tenant: str = "default",
+                persistence: PersistenceService = Depends(get_persistence),
+                info: dict = Depends(require_scope("keys:manage"))):
+    """Create a user for the caller's tenant (admin only)."""
+    _enforce_tenant(info, tenant)
+    try:
+        return get_users().create_user(persistence.get_or_create_tenant(tenant).id,
+                                       email, password, role, display_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/users", tags=["users"])
+def list_users(tenant: str = "default",
+               persistence: PersistenceService = Depends(get_persistence),
+               info: dict = Depends(require_scope("keys:manage"))):
+    _enforce_tenant(info, tenant)
+    return get_users().list_users(persistence.get_or_create_tenant(tenant).id)
+
+
+@app.patch("/users/{user_id}", tags=["users"])
+def update_user(user_id: str, role: str = Query(None), active: bool = Query(None),
+                tenant: str = "default",
+                persistence: PersistenceService = Depends(get_persistence),
+                info: dict = Depends(require_scope("keys:manage"))):
+    _enforce_tenant(info, tenant)
+    tid = persistence.get_or_create_tenant(tenant).id
+    users = get_users()
+    ok = True
+    if role:
+        try:
+            ok = users.set_role(tid, user_id, role)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+    if active is False:
+        ok = users.deactivate(tid, user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"updated": user_id}
 
 
 # ---------- dashboard ----------

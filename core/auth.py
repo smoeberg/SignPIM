@@ -26,6 +26,49 @@ ROLE_SCOPES: Dict[str, List[str]] = {
 }
 
 
+class User(Base):
+    __tablename__ = "users"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    email = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    display_name = Column(String(128), nullable=True)
+    role = Column(String(16), nullable=False, default="reader")   # admin | writer | reader
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    last_login_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (Index("idx_users_tenant_email", "tenant_id", "email", unique=True),)
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    user = relationship("User")
+
+
+def hash_password(password: str, salt: bytes = None) -> str:
+    """PBKDF2-SHA256, 200k iterations. Format: pbkdf2$<salt>$<hash>."""
+    import hashlib as _h
+    salt = salt or secrets.token_bytes(16)
+    dk = _h.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+    return f"pbkdf2${salt.hex()}${dk.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    import hashlib as _h
+    try:
+        _, salt_hex, hash_hex = stored.split("$")
+        dk = _h.pbkdf2_hmac("sha256", password.encode(), bytes.fromhex(salt_hex), 200_000)
+        return secrets.compare_digest(dk.hex(), hash_hex)
+    except (ValueError, TypeError):
+        return False
+
+
 class ApiKey(Base):
     __tablename__ = "api_keys"
     id = Column(String(36), primary_key=True, default=_uuid)
@@ -51,6 +94,120 @@ def generate_api_key() -> tuple:
     """Returns (plaintext_key, prefix). Plaintext is shown exactly once at creation."""
     raw = "spim_" + secrets.token_urlsafe(32)
     return raw, raw[:13]
+
+
+SESSION_TTL_HOURS = 72
+
+
+class UserService:
+    """Multi-user accounts per tenant with password login and sessions."""
+
+    def __init__(self, persistence):
+        self.persistence = persistence
+
+    def create_user(self, tenant_id: str, email: str, password: str,
+                    role: str = "reader", display_name: str = None) -> Dict[str, Any]:
+        if role not in ROLE_SCOPES:
+            raise ValueError(f"Unknown role '{role}'. Allowed: {', '.join(ROLE_SCOPES)}")
+        if not password or len(password) < 8:
+            raise ValueError("Password must be at least 8 characters")
+        with self.persistence.session() as s:
+            from sqlalchemy import select as _sel
+            existing = s.scalar(_sel(User).where(User.tenant_id == tenant_id,
+                                                 User.email == email.lower()))
+            if existing:
+                raise ValueError(f"User '{email}' already exists for this tenant")
+            u = User(tenant_id=tenant_id, email=email.lower(),
+                     password_hash=hash_password(password), role=role,
+                     display_name=display_name or email.split("@")[0])
+            s.add(u)
+            s.flush()
+            return {"id": u.id, "email": u.email, "role": u.role,
+                    "display_name": u.display_name}
+
+    def list_users(self, tenant_id: str) -> List[Dict[str, Any]]:
+        from sqlalchemy import select as _sel
+        with self.persistence.session() as s:
+            users = s.scalars(_sel(User).where(User.tenant_id == tenant_id)).all()
+            return [{"id": u.id, "email": u.email, "role": u.role,
+                     "display_name": u.display_name, "active": u.active,
+                     "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None}
+                    for u in users]
+
+    def set_role(self, tenant_id: str, user_id: str, role: str) -> bool:
+        if role not in ROLE_SCOPES:
+            raise ValueError(f"Unknown role '{role}'")
+        with self.persistence.session() as s:
+            u = s.get(User, user_id)
+            if u is None or u.tenant_id != tenant_id:
+                return False
+            u.role = role
+            return True
+
+    def deactivate(self, tenant_id: str, user_id: str) -> bool:
+        with self.persistence.session() as s:
+            u = s.get(User, user_id)
+            if u is None or u.tenant_id != tenant_id:
+                return False
+            u.active = False
+            return True
+
+    # ---------- sessions ----------
+    def login(self, tenant_slug: str, email: str, password: str) -> Dict[str, Any]:
+        from sqlalchemy import select as _sel
+        from datetime import timedelta
+        with self.persistence.session() as s:
+            tenant = s.scalar(_sel(Tenant).where(Tenant.slug == tenant_slug))
+            if tenant is None:
+                raise PermissionError("Unknown tenant")
+            user = s.scalar(_sel(User).where(User.tenant_id == tenant.id,
+                                             User.email == email.lower().strip()))
+            if user is None or not user.active or not verify_password(password, user.password_hash):
+                raise PermissionError("Invalid credentials")
+            user.last_login_at = _now()
+            token = "spimsess_" + secrets.token_urlsafe(32)
+            sess = Session(token_hash=hash_key(token), user_id=user.id,
+                           expires_at=_now() + timedelta(hours=SESSION_TTL_HOURS))
+            s.add(sess)
+            return {"token": token, "expires_at": sess.expires_at.isoformat(),
+                    "user": {"id": user.id, "email": user.email, "role": user.role,
+                             "display_name": user.display_name, "tenant": tenant_slug},
+                    "scopes": ROLE_SCOPES[user.role]}
+
+    def authenticate_session(self, token: str) -> Dict[str, Any]:
+        """Validate a session token. Returns identity dict (same shape as API-key auth)."""
+        from sqlalchemy import select as _sel
+        if not token.startswith("spimsess_"):
+            raise PermissionError("Malformed session token")
+        with self.persistence.session() as s:
+            sess = s.scalar(_sel(Session).where(Session.token_hash == hash_key(token)))
+            if sess is None:
+                raise PermissionError("Session expired or invalid")
+            expires = sess.expires_at
+            if expires.tzinfo is None:  # SQLite strips tzinfo; assume UTC
+                from datetime import timezone as _tz
+                expires = expires.replace(tzinfo=_tz.utc)
+            if expires < _now():
+                raise PermissionError("Session expired or invalid")
+            user = s.get(User, sess.user_id)
+            if user is None or not user.active:
+                raise PermissionError("User is deactivated")
+            return {
+                "key_id": None,
+                "user_id": user.id,
+                "email": user.email,
+                "tenant_id": user.tenant_id,
+                "role": user.role,
+                "scopes": ROLE_SCOPES[user.role],
+            }
+
+    def logout(self, token: str) -> bool:
+        from sqlalchemy import select as _sel, delete as _del
+        if not token.startswith("spimsess_"):
+            return False
+        with self.persistence.session() as s:
+            res = s.execute(_del(Session).where(Session.token_hash == hash_key(token)))
+            return res.rowcount > 0
 
 
 class AuthService:

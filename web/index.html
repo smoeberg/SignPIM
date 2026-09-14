@@ -11,10 +11,21 @@
   <h1>🛒 SignPIM</h1>
   <div class="controls">
     <label>Tenant: <input id="tenant" value="acme"></label>
-    <label>API Key: <input id="apikey" type="password" placeholder="spim_..."></label>
+    <label>API Key: <input id="apikey" type="password" placeholder="spim_... (valgfri)"></label>
     <button id="load">Hent</button>
+    <span id="whoami" class="whoami"></span>
+    <button id="login-toggle">Log ind</button>
   </div>
 </header>
+
+<div id="login-panel" class="card login-panel hidden">
+  <h2>Log ind</h2>
+  <label>Email <input id="login-email" type="email" placeholder="navn@virksomhed.dk"></label>
+  <label>Kodeord <input id="login-password" type="password"></label>
+  <button id="login-btn">Log ind</button>
+  <button id="logout-btn" class="hidden">Log ud</button>
+  <pre id="login-result" class="hidden"></pre>
+</div>
 
 <main>
   <section id="quality-card" class="card">
