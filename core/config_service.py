@@ -73,7 +73,10 @@ class ConfigService:
         if is_secret:
             f = _fernet()
             if f is None:
-                raise RuntimeError("SIGNPIM_SECRET_KEY not set — cannot store secrets safely")
+                import cryptography  # noqa: F401 — for a precise error message
+                raise RuntimeError(
+                    "Cannot store secrets: SIGNPIM_SECRET_KEY not set "
+                    "(or the 'cryptography' package is missing)")
             stored = f.encrypt(stored.encode()).decode()
         import json as _json
         payload = _json.dumps({"v": value}) if not is_secret else stored
