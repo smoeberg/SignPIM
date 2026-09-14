@@ -14,6 +14,8 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.persistence import PersistenceService
@@ -96,6 +98,16 @@ class MappingIn(BaseModel):
     source_value: str
     normalized: str
     field: str
+
+
+# ---------- dashboard ----------
+WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+@app.get("/", include_in_schema=False)
+def dashboard():
+    return FileResponse(os.path.join(WEB_DIR, "index.html"))
+
+app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
 # ---------- health ----------

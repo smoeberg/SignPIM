@@ -1,0 +1,38 @@
+:root {
+  --bg: #0f1115; --card: #1a1f26; --text: #e6e9ee; --muted: #8b93a1;
+  --accent: #4f8cff; --ok: #22c55e; --warn: #eab308; --bad: #ef4444;
+}
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font-family: system-ui, sans-serif; padding: 1rem; }
+header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: .75rem; margin-bottom: 1rem; }
+h1 { font-size: 1.4rem; }
+.controls { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+input, textarea, button, select {
+  background: #232932; color: var(--text); border: 1px solid #36404d;
+  border-radius: 6px; padding: .45rem .65rem; font-size: .9rem;
+}
+button { background: var(--accent); border: none; cursor: pointer; font-weight: 600; }
+button:hover { filter: brightness(1.1); }
+main { display: grid; gap: 1rem; grid-template-columns: 320px 1fr; }
+.card { background: var(--card); border-radius: 10px; padding: 1rem; }
+.card h2 { font-size: 1rem; margin-bottom: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+.ring {
+  width: 110px; height: 110px; border-radius: 50%;
+  border: 8px solid #888; display: grid; place-items: center;
+  margin: 0 auto .75rem; transition: border-color .3s;
+}
+#score-value { font-size: 1.8rem; font-weight: 700; }
+.dims { display: grid; gap: .5rem; }
+.dims > div { display: grid; grid-template-columns: 110px 1fr 50px; align-items: center; gap: .5rem; font-size: .85rem; }
+.bar { background: #2a323d; border-radius: 4px; height: 8px; overflow: hidden; }
+.bar > div { height: 100%; width: 0; transition: width .4s; }
+
+#products-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+#products-table th { text-align: left; color: var(--muted); padding: .4rem; border-bottom: 1px solid #36404d; }
+#products-table td { padding: .4rem; border-bottom: 1px solid #232a33; }
+
+#csv-input { width: 100%; font-family: monospace; font-size: .85rem; margin-bottom: .5rem; }
+#ingest-result { background: #11151b; padding: .6rem; border-radius: 6px; font-size: .8rem;
+  max-height: 260px; overflow: auto; white-space: pre-wrap; }
+@media (max-width: 800px) { main { grid-template-columns: 1fr; } }

@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignPIM Dashboard</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+<header>
+  <h1>🛒 SignPIM</h1>
+  <div class="controls">
+    <label>Tenant: <input id="tenant" value="acme"></label>
+    <label>API Key: <input id="apikey" type="password" placeholder="spim_..."></label>
+    <button id="load">Hent</button>
+  </div>
+</header>
+
+<main>
+  <section id="quality-card" class="card">
+    <h2>Datakvalitet</h2>
+    <div id="score-ring" class="ring"><span id="score-value">–</span></div>
+    <div class="dims">
+      <div><label>Completeness</label><div class="bar"><div id="bar-completeness"></div></div><span id="val-completeness">–</span></div>
+      <div><label>Consistency</label><div class="bar"><div id="bar-consistency"></div></div><span id="val-consistency">–</span></div>
+      <div><label>Accuracy</label><div class="bar"><div id="bar-accuracy"></div></div><span id="val-accuracy">–</span></div>
+    </div>
+  </section>
+
+  <section id="products-card" class="card">
+    <h2>Produkter <span id="product-count"></span></h2>
+    <label>Min. score: <input id="min-score" type="number" min="0" max="100" placeholder="f.eks. 75"></label>
+    <table id="products-table">
+      <thead><tr><th>SKU</th><th>Navn</th><th>Pris</th><th>Score</th><th>V.</th></tr></thead>
+      <tbody id="products-body"></tbody>
+    </table>
+  </section>
+
+  <section id="ingest-card" class="card">
+    <h2>Indlæs leverandør-feed</h2>
+    <textarea id="csv-input" rows="6" placeholder="sku,name,price,ean,images&#10;ABC-1,Stol,499.0,5901234123457,https://..."></textarea>
+    <button id="ingest-btn">Indlæs CSV</button>
+    <pre id="ingest-result"></pre>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
