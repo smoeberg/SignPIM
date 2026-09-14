@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import create_engine, select, update, delete
 from sqlalchemy.orm import Session, sessionmaker
 
-from core.models import Base, Tenant, Product, Rule, NormalizationMapping
+from core.models import Base, Tenant, Product, Rule, NormalizationMapping, LLMCall
 
 logger = logging.getLogger("signpim.persistence")
 
@@ -179,6 +179,29 @@ class PersistenceService:
             ).all()
         return [{"field": m.field, "source_value": m.source_value, "normalized": m.normalized}
                 for m in maps]
+
+    def log_llm_call(self, tenant_id: str, operator: str, provider: str, model: str,
+                     prompt_hash: str, response_hash: Optional[str],
+                     tokens_in: int, tokens_out: int, latency_ms: int, success: bool):
+        with self.session() as s:
+            s.add(LLMCall(
+                tenant_id=tenant_id, operator=operator, provider=provider, model=model,
+                prompt_hash=prompt_hash, response_hash=response_hash,
+                tokens_in=tokens_in, tokens_out=tokens_out,
+                latency_ms=latency_ms, success=success,
+            ))
+
+    def llm_usage(self, tenant_id: str) -> Dict[str, Any]:
+        with self.session() as s:
+            rows = s.scalars(
+                select(LLMCall).where(LLMCall.tenant_id == tenant_id)
+            ).all()
+        return {
+            "total_calls": len(rows),
+            "tokens_in": sum(r.tokens_in for r in rows),
+            "tokens_out": sum(r.tokens_out for r in rows),
+            "failures": sum(1 for r in rows if not r.success),
+        }
 
     def active_rules(self, tenant_id: str) -> List[Dict[str, Any]]:
         """Tenant rules + global rules (tenant_id IS NULL), active only."""

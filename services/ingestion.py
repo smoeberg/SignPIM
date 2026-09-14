@@ -77,7 +77,9 @@ class CSVIngestionService:
         for i, row in enumerate(rows):
             try:
                 normalized = self._apply_mappings(mappings, row)
-                result = self.kernel.run_workflow(workflow, normalized, tenant_id)
+                result = self.kernel.run_workflow(
+                    workflow, normalized, tenant_id,
+                    tenant_settings=tenant.settings if tenant else {})
                 pending.append({"sku": row["sku"], "data": result["data"],
                                 "quality_score": result["data"].get("quality_score")})
                 processed.append({

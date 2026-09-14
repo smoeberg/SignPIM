@@ -1,0 +1,14 @@
+name: EnrichSyncWorkflow
+entity: Product
+steps:
+  - action: validate
+    rules: [missing_sku, invalid_price, valid_ean_13]
+  - action: ai_enrich          # only fills fields empty AFTER first validate
+    operator: llm_enrich
+    config:
+      allowed_fields: [description, long_description, keywords, category]
+  - action: validate           # re-validate: AI output must pass the SAME rules
+    rules: [missing_sku, invalid_price, valid_ean_13]
+  - action: calculate
+    using: quality_weights
+  - action: persist

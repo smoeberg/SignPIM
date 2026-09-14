@@ -10,7 +10,7 @@ class PureGraphRuntime:
     def __init__(self, repository: Optional[Any] = None) -> None:
         self.repo = repository
 
-    def execute(self, graph: ExecutionGraph, entity_meta: Dict[str, Any], data: Dict[str, Any], tenant_id: str, scoring: Optional[Dict[str, float]] = None) -> Dict[str, Any]:
+    def execute(self, graph: ExecutionGraph, entity_meta: Dict[str, Any], data: Dict[str, Any], tenant_id: str, scoring: Optional[Dict[str, float]] = None, tenant_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         if not tenant_id:
             raise PermissionError("Tenant ID is strictly required for isolation.")
 
@@ -27,7 +27,8 @@ class PureGraphRuntime:
                 else:
                     typed_payload[f_name] = data.get(f_name)
 
-        ctx = {"data": typed_payload, "violations": [], "tenant_id": tenant_id}
+        ctx = {"data": typed_payload, "violations": [], "tenant_id": tenant_id,
+               "tenant_settings": tenant_settings or {}}
 
         for node in graph.nodes:
             action = node.action_node
@@ -58,11 +59,25 @@ class PureGraphRuntime:
                 # Severity-based deductions against a perfect 100 score.
                 SEVERITY_DEDUCTION = {'critical': 25.0, 'major': 15.0, 'minor': 5.0, 'info': 1.0}
                 deduction = 0.0
-                for rule_id in ctx['violations']:
+                seen = set()
+                for v in ctx['violations']:
+                    rule_id = v["rule_id"] if isinstance(v, dict) else v
+                    if rule_id in seen:      # re-validation of AI output must not double-punish
+                        continue
+                    seen.add(rule_id)
                     rule_meta = (entity_meta or {}).get('_rule_meta', {}).get(rule_id, {})
                     deduction += SEVERITY_DEDUCTION.get(rule_meta.get('severity', 'major'), 15.0)
                 ctx['data']['quality_score'] = round(max(0.0, 100.0 - deduction), 2)
                 logger.info(f"Calculated quality_score: {ctx['data']['quality_score']} (violations: {ctx['violations']})")
+
+            elif action.action_type == 'ai_enrich':
+                op_name = getattr(action, 'operator', None) or 'llm_enrich'
+                op_def = RichOperatorRegistry.get(op_name)
+                if op_def is None:
+                    raise ValueError(f"Unknown AI operator: {op_name}")
+                cfg = getattr(action, 'config', None) or {}
+                ctx['operator_config'] = cfg
+                ctx['data'] = op_def.fn(ctx['data'], ctx)
 
             elif action.action_type == 'persist':
                 if self.repo and entity_meta:

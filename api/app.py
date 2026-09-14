@@ -45,6 +45,9 @@ app = FastAPI(title="SignPIM", version="0.1.0",
 import os
 _DSN = os.environ.get("POSTGRES_DSN") or os.environ.get("DATABASE_URL") or "sqlite:///:memory:"
 persistence = PersistenceService(dsn=_DSN)
+
+from engine.operators.llm_ops import LLMCallLogger
+LLMCallLogger.bind(persistence)
 kernel = PlatformKernel(meta_dir="meta")
 kernel.bootstrap()
 ingestion = CSVIngestionService(persistence, kernel)
@@ -365,6 +368,15 @@ def list_keys(tenant: str = "default",
     if info["tenant_id"] != t.id:
         raise HTTPException(status_code=403, detail="Key not valid for this tenant")
     return get_auth().list_keys(t.id)
+
+
+@app.get("/llm/usage", tags=["ai"])
+def llm_usage(tenant: str = "default",
+              info: dict = Depends(require_scope("quality:read")),
+              persistence: PersistenceService = Depends(get_persistence)):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return persistence.llm_usage(t.id)
 
 
 @app.delete("/keys/{key_id}", tags=["keys"])

@@ -48,7 +48,8 @@ class PlatformKernel:
 
         logger.info(f"PlatformKernel: Successfully compiled {len(self.compiled_graphs)} Execution Graphs.")
 
-    def run_workflow(self, workflow_name: str, payload: Dict[str, Any], tenant_id: str) -> Dict[str, Any]:
+    def run_workflow(self, workflow_name: str, payload: Dict[str, Any], tenant_id: str,
+                     tenant_settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         graph = self.compiled_graphs.get(workflow_name.lower())
         if not graph:
             raise ValueError(f"ExecutionGraph for workflow '{workflow_name}' not found.")
@@ -57,4 +58,5 @@ class PlatformKernel:
         if entity_meta is not None:
             entity_meta = dict(entity_meta)
             entity_meta['_rule_meta'] = self._rule_meta
-        return self.runtime.execute(graph, entity_meta, payload, tenant_id, scoring=self._scoring)
+        return self.runtime.execute(graph, entity_meta, payload, tenant_id,
+                                    scoring=self._scoring, tenant_settings=tenant_settings)

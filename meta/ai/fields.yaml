@@ -1,0 +1,14 @@
+# AI operator field governance — config, NOT code.
+# llm_enrich may ONLY write fields listed here (minus protected fields).
+# Protected fields (never AI-writable) are also configurable per tenant:
+#   tenant settings['llm']['protected_fields'] overrides PROTECTED_FIELDS_DEFAULT.
+enrichable_fields:
+  - description
+  - long_description
+  - keywords
+  - category
+
+protected_fields:          # hard block — overrides enrichable, overrides tenant config
+  - sku
+  - ean
+  - price

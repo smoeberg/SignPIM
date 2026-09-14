@@ -75,3 +75,22 @@ class NormalizationMapping(Base):
     field = Column(String(128), nullable=False)          # f.eks. "color"
 
     tenant = relationship("Tenant", back_populates="normalization_mappings")
+
+
+class LLMCall(Base):
+    """Cost/audit log for AI operator calls. Prompt & response stored as hashes only (PII-safe)."""
+    __tablename__ = "llm_calls"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    operator = Column(String(64), nullable=False)
+    provider = Column(String(32), nullable=False)
+    model = Column(String(128), nullable=False, default="n/a")
+    prompt_hash = Column(String(64), nullable=False)
+    response_hash = Column(String(64), nullable=True)
+    tokens_in = Column(Integer, nullable=False, default=0)
+    tokens_out = Column(Integer, nullable=False, default=0)
+    latency_ms = Column(Integer, nullable=False, default=0)
+    success = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (Index("idx_llm_calls_tenant", "tenant_id", "created_at"),)
