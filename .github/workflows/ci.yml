@@ -20,12 +20,25 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: pip install -r requirements.txt -r requirements-dev.txt
-      - name: Run tests
-        run: PYTHONPATH=. python -m pytest tests/ -q --tb=short
+      - name: Run functional tests (perf excluded)
+        run: PYTHONPATH=. python -m pytest tests/ -q --tb=short --ignore=tests/perf
       - name: OpenAPI contract is current
         run: |
           PYTHONPATH=. python scripts/export_openapi.py docs/openapi.json
           git diff --exit-code docs/openapi.json || (echo "::error::OpenAPI spec out of date — run scripts/export_openapi.py" && exit 1)
+
+  benchmark:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - name: Scale benchmark (on demand)
+        run: PYTHONPATH=. python -m pytest tests/perf/ -q -s
 
   docker:
     runs-on: ubuntu-latest

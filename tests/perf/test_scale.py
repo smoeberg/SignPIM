@@ -4,7 +4,14 @@ import resource
 import time
 import csv as csv_mod
 
+import os
+
 import pytest
+
+pytestmark = pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="perf benchmark excluded from CI — runs on demand via make benchmark",
+)
 
 from core.persistence import PersistenceService
 from services.ingestion import CSVIngestionService
