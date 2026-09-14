@@ -121,6 +121,27 @@ class MappingIn(BaseModel):
     field: str
 
 
+# ---------- export ----------
+@app.get("/export/{slug}", tags=["export"])
+def export_products(slug: str, fmt: str = Query("csv", pattern="^(csv|json|xml)$"),
+                    min_score: Optional[float] = Query(None, ge=0, le=100),
+                    limit: int = Query(10000, ge=1, le=100000),
+                    delimiter: str = Query(",", max_length=1),
+                    persistence: PersistenceService = Depends(get_persistence),
+                    info: dict = Depends(require_scope("products:read"))):
+    """Batch export to webshop/ERP format (CSV/JSON/XML)."""
+    _enforce_tenant(info, slug)
+    from services.exporters import ExportService, ExportError
+    try:
+        result = ExportService(persistence).export(slug, fmt, min_score, limit, delimiter)
+    except ExportError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    from fastapi.responses import Response
+    media = {"csv": "text/csv", "json": "application/json", "xml": "application/xml"}[fmt]
+    return Response(content=result["content"], media_type=media,
+                    headers={"Content-Disposition": f'attachment; filename="{result["filename"]}"'})
+
+
 # ---------- webhooks ----------
 def _tenant_id_of(info: dict) -> str:
     return info["tenant_id"]
