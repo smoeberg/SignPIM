@@ -36,17 +36,29 @@ class CSVIngestionService:
         self.kernel = kernel
         self.scorer = QualityScoringService(repository=PersistenceQualityHook(persistence))
 
-    def parse_csv(self, content: str) -> List[Dict[str, Any]]:
-        """Parse a CSV string into product dicts; raises on missing required columns."""
-        reader = csv.DictReader(io.StringIO(content))
+    def parse_csv(self, content: str, header_map: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+        """Parse a supplier CSV into product dicts. header_map renames supplier
+        columns to internal fields (config-driven, per tenant settings.feed_column_map).
+        Supplier delimiter (;) auto-detected."""
+        # auto-detect delimiter
+        sample = content[:4096]
+        delimiter = ";"
+        try:
+            delimiter = csv.Sniffer().sniff(sample, delimiters=",;\t|").delimiter
+        except csv.Error:
+            pass
+        reader = csv.DictReader(io.StringIO(content), delimiter=delimiter)
         if reader.fieldnames is None:
             raise IngestionError("Empty CSV: no header row")
-        missing = [c for c in REQUIRED_COLUMNS if c not in reader.fieldnames]
+        hmap = header_map or {}
+        fieldnames = [hmap.get(h.strip(), h.strip()) for h in reader.fieldnames]
+        missing = [c for c in REQUIRED_COLUMNS if c not in fieldnames]
         if missing:
             raise IngestionError(f"Missing required columns: {', '.join(missing)}")
         rows = []
         for i, raw in enumerate(reader):
-            row = {k: (v.strip() if isinstance(v, str) else v) for k, v in raw.items() if k is not None}
+            row = {hmap.get(k.strip(), k.strip()): (v.strip() if isinstance(v, str) else v)
+                   for k, v in raw.items() if k is not None}
             if not any(row.values()):
                 continue  # skip blank lines
             for f in VALID_NUMERIC_FIELDS:
@@ -65,8 +77,9 @@ class CSVIngestionService:
         Full ingestion: parse → normalize mappings → run engine workflow per row →
         persist with quality score → tenant-level 3D summary.
         """
-        rows = self.parse_csv(csv_content)
         tenant = self.persistence.get_or_create_tenant(tenant_slug)
+        rows = self.parse_csv(csv_content,
+                              header_map=(tenant.settings or {}).get("feed_column_map"))
         tenant_id = tenant.id
 
         # Load tenant config ONCE per ingest (was: one query per row)

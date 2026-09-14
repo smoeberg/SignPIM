@@ -45,9 +45,15 @@ class PureGraphRuntime:
                             ctx['violations'].append(cond.rule_id)
 
             elif action.action_type == 'transform':
+                settings = ctx.get('tenant_settings') or {}
+                skip_vat = settings.get('feed_price_includes_vat', False)
                 for cond in action.conditions:
                     op = cond.operator_node
                     if op.operator_name == 'multiply' and op.field in ctx['data']:
+                        # If tenant declared prices already include VAT, don't multiply price by VAT
+                        if op.field == 'price' and op.target_value in ('1.25', 1.25) and skip_vat:
+                            logger.info("Skipping VAT multiply because feed_price_includes_vat is set")
+                            continue
                         ctx['data'][op.field] = ctx['data'][op.field] * float(op.target_value)
                         logger.info(f"Transformed field [{op.field}] using operator multiply: {ctx['data'][op.field]}")
 
