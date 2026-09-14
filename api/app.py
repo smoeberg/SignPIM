@@ -539,12 +539,37 @@ def _slug_of(info: dict) -> str:
 
 # ---------- feed import ----------
 @app.post("/feeds/{slug}/poll", tags=["feeds"])
-def poll_feed(slug: str, directory: str = Query(..., description="Local directory with CSV feeds"),
+def poll_feed(slug: str, mode: str = Query("local", pattern="^(local|sftp)$"),
+              directory: str = Query(None, description="Local directory (mode=local)"),
               persistence: PersistenceService = Depends(get_persistence),
               info: dict = Depends(require_scope("ingest:write"))):
-    """Poll a local feed directory for new/changed supplier CSVs (SFTP variant available via services.feed_import.SFTPFeedImporter)."""
+    """Poll a feed directory for new/changed supplier CSVs.
+
+    mode=local: directory from query param.
+    mode=sftp: host/port/username/credentials come from environment
+    (SIGNPIM_SFTP_HOST, SIGNPIM_SFTP_PORT, SIGNPIM_SFTP_USER,
+    SIGNPIM_SFTP_PASSWORD, SIGNPIM_SFTP_KEY_PATH) — never from the request body."""
     _enforce_tenant(info, slug)
-    from services.feed_import import LocalFeedImporter
+    from services.feed_import import LocalFeedImporter, SFTPFeedImporter
+    if mode == "sftp":
+        import os
+        host = os.environ.get("SIGNPIM_SFTP_HOST")
+        if not host:
+            raise HTTPException(status_code=503,
+                                detail="SFTP not configured: set SIGNPIM_SFTP_HOST")
+        remote_dir = os.environ.get("SIGNPIM_SFTP_REMOTE_DIR", "/out")
+        user = os.environ.get("SIGNPIM_SFTP_USER", "signpim")
+        password = os.environ.get("SIGNPIM_SFTP_PASSWORD")
+        key_path = os.environ.get("SIGNPIM_SFTP_KEY_PATH")
+        if not password and not key_path:
+            raise HTTPException(status_code=503,
+                                detail="SFTP needs SIGNPIM_SFTP_PASSWORD or SIGNPIM_SFTP_KEY_PATH")
+        importer = SFTPFeedImporter(persistence, ingestion)
+        return importer.poll(slug, host=host, remote_dir=remote_dir, username=user,
+                             password=password, key_path=key_path,
+                             port=int(os.environ.get("SIGNPIM_SFTP_PORT", "22")))
+    if not directory:
+        raise HTTPException(status_code=400, detail="mode=local requires 'directory'")
     importer = LocalFeedImporter(persistence, ingestion)
     return importer.poll_local(slug, directory)
 
