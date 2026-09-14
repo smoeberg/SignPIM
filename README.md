@@ -51,3 +51,29 @@ python3 main.py
 - Add new rules in `meta/rules/`
 - Add new workflows in `meta/workflow/`
 - Define new entities in `meta/entities/`
+
+---
+
+## Production (v0.2)
+
+```bash
+export POSTGRES_PASSWORD=<secret>
+docker compose -f docker-compose.prod.yml up -d --build
+# optional TLS edge:
+docker compose -f docker-compose.prod.yml --profile edge up -d
+```
+
+- API: `http://localhost:8000` — interactive docs at `/docs` (Swagger UI).
+- Health probe: `GET /health`.
+- Tenant-scoped: all endpoints accept `?tenant=<slug>`.
+- Quality scoring: 3D model (completeness/consistency/accuracy), per-product breakdown.
+
+### Ingest a supplier feed
+```bash
+curl -X POST "http://localhost:8000/tenants/acme/ingest?body=sku,name,price%0AABC-1,Widget,199.5"
+```
+
+### Regenerate the OpenAPI contract
+```bash
+python scripts/export_openapi.py docs/openapi.json
+```

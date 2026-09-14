@@ -26,7 +26,9 @@ app = FastAPI(title="SignPIM", version="0.1.0",
               description="Feed-First & Headless PIM for complex supplier data")
 
 # --- singletons (swap DSN via env in prod) ---
-persistence = PersistenceService()   # default SQLite; override with POSTGRES_DSN in prod
+import os
+_DSN = os.environ.get("POSTGRES_DSN") or os.environ.get("DATABASE_URL") or "sqlite:///:memory:"
+persistence = PersistenceService(dsn=_DSN)
 kernel = PlatformKernel(meta_dir="meta")
 kernel.bootstrap()
 ingestion = CSVIngestionService(persistence, kernel)
@@ -61,6 +63,13 @@ class MappingIn(BaseModel):
     source_value: str
     normalized: str
     field: str
+
+
+# ---------- health ----------
+@app.get("/health", tags=["ops"])
+def health():
+    """Liveness/readiness probe used by Docker healthchecks & load balancers."""
+    return {"status": "ok", "version": app.version}
 
 
 # ---------- ingestion ----------
