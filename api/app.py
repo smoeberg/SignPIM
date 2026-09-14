@@ -633,3 +633,67 @@ def add_mapping(mapping: MappingIn, tenant: str = "default",
                 info: dict = Depends(require_scope("mappings:write"))):
     t = persistence.get_or_create_tenant(tenant)
     return persistence.add_mapping(t.id, mapping.source_value, mapping.normalized, mapping.field)
+
+
+# ============ Admin config backend ============
+from core.config_service import ConfigService as _ConfigService
+
+
+def _cfg_service(persistence: PersistenceService) -> _ConfigService:
+    return _ConfigService(persistence)
+
+
+def _require_admin(info: dict):
+    if info.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+
+@app.get("/admin/config", tags=["admin"])
+def admin_list_config(tenant: str = "default",
+                      persistence: PersistenceService = Depends(get_persistence),
+                      info: dict = Depends(require_scope("keys:manage"))):
+    """List all config entries for a tenant. Secrets masked."""
+    _require_admin(info)
+    t = persistence.get_or_create_tenant(tenant)
+    return _cfg_service(persistence).list_keys(t.id)
+
+
+@app.get("/admin/config/effective", tags=["admin"])
+def admin_effective_config(tenant: str = "default",
+                           persistence: PersistenceService = Depends(get_persistence),
+                           info: dict = Depends(require_scope("keys:manage"))):
+    """Full resolution view: tenant DB > global DB > env, with sources shown."""
+    _require_admin(info)
+    t = persistence.get_or_create_tenant(tenant)
+    return _cfg_service(persistence).effective(t.id)
+
+
+@app.put("/admin/config/{key}", tags=["admin"])
+def admin_set_config(key: str, body: dict, tenant: str = "default",
+                     persistence: PersistenceService = Depends(get_persistence),
+                     info: dict = Depends(require_scope("keys:manage"))):
+    """Set a config key. Secrets are encrypted at rest (requires SIGNPIM_SECRET_KEY)."""
+    _require_admin(info)
+    if "value" not in body:
+        raise HTTPException(status_code=422, detail="body must contain 'value'")
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return _cfg_service(persistence).set(
+            key, body["value"], tenant_id=body.get("global") and None or t.id,
+            updated_by=info.get("user", {}).get("email"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.delete("/admin/config/{key}", tags=["admin"])
+def admin_delete_config(key: str, tenant: str = "default",
+                        persistence: PersistenceService = Depends(get_persistence),
+                        info: dict = Depends(require_scope("keys:manage"))):
+    _require_admin(info)
+    t = persistence.get_or_create_tenant(tenant)
+    ok = _cfg_service(persistence).delete(key, tenant_id=t.id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Config key not found")
+    return {"deleted": key}
