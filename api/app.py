@@ -213,6 +213,10 @@ def webhook_deliveries(webhook_id: str, tenant: str = "default",
     from services.webhooks import WebhookDelivery
     t = persistence.get_or_create_tenant(tenant)
     with persistence.session() as s:
+        from services.webhooks import WebhookSubscription
+        sub = s.get(WebhookSubscription, webhook_id)
+        if sub is None or sub.tenant_id != t.id:
+            raise HTTPException(status_code=404, detail="Webhook not found")
         rows = s.scalars(select(WebhookDelivery).where(
             WebhookDelivery.tenant_id == t.id,
             WebhookDelivery.subscription_id == webhook_id).limit(50)).all()

@@ -71,3 +71,26 @@ def test_scale_50k_products(env):
     mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
     print(f"[memory]   peak RSS: {mb:.0f} MB")
     assert mb < MEMORY_BUDGET_MB
+
+
+# --- 10k tier: runs everywhere incl. small CI runners / 512MB VMs ---
+N_SMALL = 10_000
+INGEST_BUDGET_S_SMALL = 30
+EXPORT_BUDGET_S_SMALL = 10
+
+
+@pytest.mark.parametrize("fmt,count_budget", [("json", N_SMALL), ("csv", N_SMALL)])
+def test_scale_10k(env, fmt, count_budget):
+    feed = _feed(N_SMALL)
+    t0 = time.perf_counter()
+    result = env[1].ingest(feed, "scale10k")
+    t_ingest = time.perf_counter() - t0
+    assert result["rows_ingested"] == N_SMALL
+    assert t_ingest < INGEST_BUDGET_S_SMALL, f"ingest too slow: {t_ingest:.2f}s"
+
+    t0 = time.perf_counter()
+    out = ExportService(env[0]).export("scale10k", fmt=fmt)
+    t_export = time.perf_counter() - t0
+    assert out["count"] == count_budget
+    assert t_export < EXPORT_BUDGET_S_SMALL, f"{fmt} export too slow: {t_export:.2f}s"
+    print(f"\n[10k/{fmt}] ingest {t_ingest:.2f}s, export {t_export:.2f}s")

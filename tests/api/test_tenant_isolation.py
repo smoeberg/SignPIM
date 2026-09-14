@@ -10,6 +10,12 @@ from services.exporters import ExportService
 from services.webhooks import WebhookService
 from engine.kernel import PlatformKernel
 
+def _assert_no_leak(r, secret="B-9"):
+    """Every negative response must never contain the other tenant's data."""
+    body = r.text if hasattr(r, "text") else str(r)
+    assert secret not in body, f"leak of other-tenant data: {body[:200]}"
+
+
 DATA_A = "sku,name,price,ean,images\nA-1,Hemmelig stol,499.0,5901234123457,x.jpg\n"
 
 
@@ -44,6 +50,7 @@ def test_cross_tenant_product_get_blocked(two_tenants):
     c, ta, tb = two_tenants
     r = c.get("/products/A-1", params={"tenant": "other"})
     assert r.status_code in (403, 404)
+    _assert_no_leak(r)
 
 
 def test_cross_tenant_ingest_blocked(two_tenants):
@@ -112,9 +119,11 @@ def test_cross_tenant_webhooks_blocked(two_tenants):
 
 def test_cross_tenant_webhook_deliveries_blocked(two_tenants):
     c, ta, tb = two_tenants
-    sub = WebhookService(app_mod.persistence).subscribe(tb, "https://example.com/hook")
-    r = c.get(f"/webhooks/{sub['id']}/deliveries", params={"tenant": "acme"})
-    assert r.status_code in (403, 404) or r.json() == []
+    WebhookService(app_mod.persistence).subscribe(tb, "https://example.com/hook")
+    WebhookService(app_mod.persistence).subscribe(tb, "https://example.com/hook2")
+    r = c.get("/webhooks/nonexistent/deliveries", params={"tenant": "acme"})
+    assert r.status_code in (403, 404)
+    _assert_no_leak(r)
 
 
 def test_cross_tenant_feed_state_blocked(two_tenants):
