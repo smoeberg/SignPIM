@@ -204,6 +204,35 @@ def _slug_of(info: dict) -> str:
         return t.slug if t else info["tenant_id"]
 
 
+# ---------- feed import ----------
+@app.post("/feeds/{slug}/poll", tags=["feeds"])
+def poll_feed(slug: str, directory: str = Query(..., description="Local directory with CSV feeds"),
+              persistence: PersistenceService = Depends(get_persistence),
+              info: dict = Depends(require_scope("ingest:write"))):
+    """Poll a local feed directory for new/changed supplier CSVs (SFTP variant available via services.feed_import.SFTPFeedImporter)."""
+    _enforce_tenant(info, slug)
+    from services.feed_import import LocalFeedImporter
+    importer = LocalFeedImporter(persistence, ingestion)
+    return importer.poll_local(slug, directory)
+
+
+@app.get("/feeds/{slug}/state", tags=["feeds"])
+def feed_state(slug: str,
+               persistence: PersistenceService = Depends(get_persistence),
+               info: dict = Depends(require_scope("products:read"))):
+    """Import state per feed file (checksum-based idempotency)."""
+    _enforce_tenant(info, slug)
+    from sqlalchemy import select
+    from services.feed_import import FeedImportState
+    t = persistence.get_or_create_tenant(slug)
+    with persistence.session() as s:
+        states = s.scalars(select(FeedImportState).where(
+            FeedImportState.tenant_id == t.id)).all()
+        return [{"file": st.file_key, "checksum": st.checksum[:12],
+                 "rows": st.rows_ingested, "errors": st.errors,
+                 "imported_at": st.imported_at.isoformat()} for st in states]
+
+
 # ---------- quality ----------
 @app.get("/quality/{slug}", tags=["quality"])
 def quality_summary(slug: str,

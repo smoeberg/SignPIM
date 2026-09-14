@@ -409,6 +409,99 @@
         }
       }
     },
+    "/feeds/{slug}/poll": {
+      "post": {
+        "tags": [
+          "feeds"
+        ],
+        "summary": "Poll Feed",
+        "description": "Poll a local feed directory for new/changed supplier CSVs (SFTP variant available via services.feed_import.SFTPFeedImporter).",
+        "operationId": "poll_feed_feeds__slug__poll_post",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          },
+          {
+            "name": "directory",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Local directory with CSV feeds",
+              "title": "Directory"
+            },
+            "description": "Local directory with CSV feeds"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feeds/{slug}/state": {
+      "get": {
+        "tags": [
+          "feeds"
+        ],
+        "summary": "Feed State",
+        "description": "Import state per feed file (checksum-based idempotency).",
+        "operationId": "feed_state_feeds__slug__state_get",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Slug"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/quality/{slug}": {
       "get": {
         "tags": [
