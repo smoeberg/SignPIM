@@ -69,19 +69,20 @@ class CSVIngestionService:
         tenant = self.persistence.get_or_create_tenant(tenant_slug)
         tenant_id = tenant.id
 
-        processed, errors = [], []
+        # Load tenant config ONCE per ingest (was: one query per row)
+        mappings = self.persistence.get_mappings(tenant_id)
+        rules = self.persistence.active_rules(tenant_id)
+
+        processed, errors, pending = [], [], []
         for i, row in enumerate(rows):
             try:
-                normalized = self.persistence.apply_mappings(tenant_id, row)
+                normalized = self._apply_mappings(mappings, row)
                 result = self.kernel.run_workflow(workflow, normalized, tenant_id)
-                saved = self.persistence.upsert_product(
-                    tenant_id, row["sku"], result["data"],
-                    quality_score=result["data"].get("quality_score"),
-                )
+                pending.append({"sku": row["sku"], "data": result["data"],
+                                "quality_score": result["data"].get("quality_score")})
                 processed.append({
                     "sku": row["sku"], "violations": result.get("violations", []),
                     "quality_score": result["data"].get("quality_score"),
-                    "version": saved["version"],
                 })
             except IngestionError:
                 raise
@@ -89,13 +90,24 @@ class CSVIngestionService:
                 logger.warning("Row %s (sku=%s) failed: %s", i + 1, row.get("sku"), e)
                 errors.append({"row": i + 1, "sku": row.get("sku"), "error": str(e)})
 
-        persisted = self.persistence.list_products(tenant_id, limit=100000)
+        # Single-session bulk persist
+        saved = self.persistence.upsert_products_batch(tenant_id, pending)
+
+        # 3D summary over the ingested set (no re-read of the whole table)
         summary = self.scorer.run(
-            [dict(p["data"], sku=p["sku"]) for p in persisted],
-            rules=self.persistence.active_rules(tenant_id),
+            [dict(p["data"], sku=p["sku"]) for p in pending],
+            rules=rules,
             tenant_id=tenant_id,
         )
-        summary.pop("per_product", None)
+        per_product = summary.pop("per_product", [])
+        if per_product:
+            self.persistence.save_quality_scores_bulk(
+                tenant_id, [{"sku": pp["sku"], "quality_score": pp["quality_score"]}
+                            for pp in per_product])
+        for p in processed:
+            match = next((pp for pp in per_product if pp["sku"] == p["sku"]), None)
+            if match:
+                p["quality_score"] = match["quality_score"]
 
         return {
             "tenant": tenant_slug,
@@ -104,3 +116,15 @@ class CSVIngestionService:
             "products": processed,
             "summary": summary,
         }
+
+    @staticmethod
+    def _apply_mappings(mappings: List[Any], data: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply pre-loaded normalization mappings without hitting the DB."""
+        if not mappings:
+            return data
+        out = dict(data)
+        for m in mappings:
+            key = m["field"]
+            if key in out and isinstance(out[key], str) and out[key].strip() == m["source_value"]:
+                out[key] = m["normalized"]
+        return out

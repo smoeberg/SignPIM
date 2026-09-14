@@ -99,6 +99,57 @@ class PersistenceService:
                 for p in s.scalars(q)
             ]
 
+    def upsert_products_batch(self, tenant_id: str, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Bulk upsert: items = [{"sku":..., "data":..., "quality_score":...}].
+        Single session for the whole batch (~10x faster than per-row sessions)."""
+        out = []
+        with self.session() as s:
+            skus = [it["sku"] for it in items]
+            existing = {}
+            for i in range(0, len(skus), 900):  # chunk: SQLite IN() limit
+                for p in s.scalars(
+                    select(Product).where(Product.tenant_id == tenant_id,
+                                          Product.sku.in_(skus[i:i + 900]))
+                ).all():
+                    existing[p.sku] = p
+            for it in items:
+                p = existing.get(it["sku"])
+                if p is None:
+                    p = Product(tenant_id=tenant_id, sku=it["sku"],
+                                data=it.get("data") or {},
+                                quality_score=it.get("quality_score"))
+                    s.add(p)
+                    version = 1
+                else:
+                    p.data = it.get("data") or p.data
+                    if it.get("quality_score") is not None:
+                        p.quality_score = it["quality_score"]
+                    p.version += 1
+                    version = p.version
+                out.append({"sku": it["sku"], "tenant_id": tenant_id,
+                            "version": version,
+                            "quality_score": it.get("quality_score")})
+        return out
+
+    def save_quality_scores_bulk(self, tenant_id: str, scores: List[Dict[str, Any]]) -> int:
+        """Bulk-update quality scores: [{"sku":..., "quality_score":...}]. Single session."""
+        with self.session() as s:
+            skus = [x["sku"] for x in scores]
+            existing = {}
+            for i in range(0, len(skus), 900):  # chunk: SQLite IN() limit
+                for p in s.scalars(
+                    select(Product).where(Product.tenant_id == tenant_id,
+                                          Product.sku.in_(skus[i:i + 900]))
+                ).all():
+                    existing[p.sku] = p
+            n = 0
+            for x in scores:
+                p = existing.get(x["sku"])
+                if p is not None:
+                    p.quality_score = x["quality_score"]
+                    n += 1
+        return n
+
     def save_quality_score(self, tenant_id: str, sku: str, score: float) -> Dict[str, Any]:
         """Persist a computed per-product quality score (used by QualityScoringService)."""
         with self.session() as s:
@@ -120,6 +171,14 @@ class PersistenceService:
             s.add(r)
             s.flush()
             return {"id": r.id, "rule_id": r.rule_id, "category": r.category}
+
+    def get_mappings(self, tenant_id: str) -> List[Dict[str, Any]]:
+        with self.session() as s:
+            maps = s.scalars(
+                select(NormalizationMapping).where(NormalizationMapping.tenant_id == tenant_id)
+            ).all()
+        return [{"field": m.field, "source_value": m.source_value, "normalized": m.normalized}
+                for m in maps]
 
     def active_rules(self, tenant_id: str) -> List[Dict[str, Any]]:
         """Tenant rules + global rules (tenant_id IS NULL), active only."""
