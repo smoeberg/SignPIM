@@ -144,6 +144,10 @@ class ImageService:
         with open(path, "rb") as f:
             return f.read()
 
+    def read_blob(self, rel_url: str) -> bytes:
+        """Read a stored blob (AI-proposed or applied). Same validation as read_file."""
+        return self.read_file(rel_url)
+
 
 class ImageError(Exception):
     pass

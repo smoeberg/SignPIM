@@ -13,7 +13,7 @@ Endpoints:
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
@@ -297,6 +297,73 @@ def update_user(user_id: str, role: str = Query(None), active: bool = Query(None
 
 # ---------- dashboard ----------
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
+
+@app.get("/products/{sku}/images/proposals", tags=["images"])
+def list_image_proposals(sku: str, tenant: str = "default",
+                         persistence: PersistenceService = Depends(get_persistence),
+                         info: dict = Depends(require_scope("products:read"))):
+    """List AI-proposed images awaiting human review. Readers allowed; apply is not."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    p = persistence.get_product(t.id, sku)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"Product {sku} not found")
+    proposals = ((p.data or {}).get("_ai_meta") or {}).get("images_proposed") or []
+    if isinstance(proposals, dict):
+        candidates = [proposals]
+    else:
+        candidates = [x for x in proposals if isinstance(x, dict)]
+    return {"sku": sku, "proposals": candidates}
+
+
+@app.post("/products/{sku}/images/apply", tags=["images"])
+def apply_image_proposal(sku: str, tenant: str = "default",
+                         body: dict = Body(default={}),
+                         persistence: PersistenceService = Depends(get_persistence),
+                         info: dict = Depends(require_scope("products:write"))):
+    """Human review endpoint: bind a proposed (or uploaded) image to the product.
+    Only this path commits images to product.images — AI operators never bind."""
+    _enforce_tenant(info, tenant)
+    url = body.get("url")
+    if not url or not isinstance(url, str):
+        raise HTTPException(status_code=400, detail="Missing 'url'")
+    t = persistence.get_or_create_tenant(tenant)
+    p = persistence.get_product(t.id, sku)
+    if p is None:
+        raise HTTPException(status_code=404, detail=f"Product {sku} not found")
+    # Validate the blob exists in our media store (no external URLs)
+    try:
+        image_service.read_blob(url)
+    except (ImageError, OSError):
+        raise HTTPException(status_code=404, detail="Unknown proposal for this product")
+    proposals = ((p.data or {}).get("_ai_meta") or {}).get("images_proposed") or []
+    if isinstance(proposals, dict):
+        candidates = [proposals]
+    else:
+        candidates = [x for x in proposals if isinstance(x, dict)]
+    match = next((c for c in candidates if c.get("url") == url), None)
+    if match is None:
+        raise HTTPException(status_code=404, detail="Unknown proposal for this product")
+    stored = image_service.bind_existing(t.id, sku, url)
+    data = dict(p.data or {})
+    ai = dict(data.get("_ai_meta") or {})
+    raw = ai.get("images_proposed")
+    if isinstance(raw, dict):
+        remaining = raw if raw.get("url") != url else None
+        if remaining:
+            ai["images_proposed"] = remaining
+        else:
+            ai.pop("images_proposed", None)
+    elif isinstance(raw, list):
+        remaining = [x for x in raw if not (isinstance(x, dict) and x.get("url") == url)]
+        if remaining:
+            ai["images_proposed"] = remaining
+        else:
+            ai.pop("images_proposed", None)
+    data["_ai_meta"] = ai
+    persistence.update_product(t.id, sku, {"data": data})
+    return {"status": "applied", "sku": sku, **stored}
+
 
 @app.post("/products/{sku}/images", tags=["images"])
 async def upload_image(sku: str, request: Request, tenant: str = "default",
