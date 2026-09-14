@@ -428,6 +428,7 @@ def quality_summary(slug: str,
                     persistence: PersistenceService = Depends(get_persistence),
                     info: dict = Depends(require_scope("quality:read"))):
     """Tenant-level 3D quality summary: completeness / consistency / accuracy."""
+    _enforce_tenant(info, slug)
     t = persistence.get_or_create_tenant(slug)
     products = persistence.list_products(t.id, limit=100000)
     if not products:

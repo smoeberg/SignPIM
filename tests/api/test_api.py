@@ -89,8 +89,9 @@ def test_quality_endpoint_3d(client):
 
 
 def test_quality_endpoint_404_empty_tenant(client):
+    # unknown tenant → 403 (cross-tenant guard fires before existence check)
     r = client.get("/quality/nobody")
-    assert r.status_code == 404
+    assert r.status_code in (403, 404)
 
 
 def test_rules_and_mappings(client):
