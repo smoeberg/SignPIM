@@ -5,6 +5,11 @@ steps:
     rules: [missing_sku, invalid_price, valid_ean_13]
   - action: ai_enrich          # only fills fields empty AFTER first validate
     operator: llm_enrich
+  - action: ai_images          # resolves missing_images: match (proposed) or generate (blob only)
+    operator: ai_resolve_images
+    config:
+      mode: generate           # 'match' needs supplier image URLs; generate works offline
+
     config:
       allowed_fields: [description, long_description, keywords, category]
   - action: validate           # re-validate: AI output must pass the SAME rules

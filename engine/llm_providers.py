@@ -47,6 +47,15 @@ class MockLLMProvider(LLMProvider):
             fill = {k: f"mock-filled-{digest[:6]}" for k in wanted}
             return {"text": json.dumps(fill), "tokens_in": len(prompt) // 4,
                     "tokens_out": 8, "model": "mock-1"}
+        if "Match a product to image URLs" in prompt:
+            import json as _j
+            m_cand = re.search(r"Candidates: (\[.*?\])", prompt)
+            cands = _j.loads(m_cand.group(1)) if m_cand else []
+            return {"text": _j.dumps({"url": cands[0]}) if cands else "{}",
+                    "tokens_in": len(prompt) // 4, "tokens_out": 8, "model": "mock-1"}
+        if "Propose generation parameters" in prompt:
+            return {"text": json.dumps({"prompt": "generated product image"}),
+                    "tokens_in": len(prompt) // 4, "tokens_out": 8, "model": "mock-1"}
         if "strict JSON" in prompt and "{" in prompt:
             # Deterministic JSON payload shaped for enrich/classify prompts.
             try:

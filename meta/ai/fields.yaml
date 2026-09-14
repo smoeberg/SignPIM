@@ -12,3 +12,6 @@ protected_fields:          # hard block — overrides enrichable, overrides tena
   - sku
   - ean
   - price
+
+ai_image_modes: [match, generate]
+ai_image_protected: [sku, ean, price]   # never implied by image ops either

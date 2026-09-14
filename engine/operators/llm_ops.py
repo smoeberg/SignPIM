@@ -16,6 +16,7 @@ from typing import Any, Dict, List
 
 from engine.llm_providers import LLMProvider, resolve_provider_from_settings
 from engine.operators.registry import RichOperatorRegistry
+from services.images import ImageError, PlaceholderGenerator
 
 PROTECTED_FIELDS_DEFAULT = ["sku", "ean", "price"]
 
@@ -208,5 +209,76 @@ def llm_translate(data: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
 
 
 RichOperatorRegistry.register("llm_translate", llm_translate,
+                              category="ai", is_deterministic=False,
+                              side_effects=True, security_level="elevated")
+
+
+# ---------- 5. ai_resolve_images ----------
+
+def ai_resolve_images(data: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolves missing product images via AI, subject to governance.
+
+    Two modes (config-driven, mirrors llm_match_supplier's proposed-not-applied pattern):
+    - mode "match": LLM maps supplier image URLs to SKUs -> PROPOSED mappings in
+      ctx['_proposed_image_matches'] for human review. Never writes product data.
+    - mode "generate": LLM proposes generation parameters -> candidate stored via
+      ImageService into ctx['image_service'] when present; URL lands in
+      data['_ai_meta']['images_proposed'] only. Never touches product.images directly.
+
+    Governance: only touches product.images through ImageService._bind (same path as
+    human uploads); output is always recorded in _ai_meta; never touches protected fields.
+    """
+    cfg = ctx.get('operator_config', {})
+    mode = cfg.get("mode", "match")
+    provider = _provider_for(ctx.get("tenant_settings", {}))
+    sku = data.get("sku", "")
+    if data.get("images"):
+        return data  # only fills missing images — same as llm_enrich's only-fills-missing
+    if mode == "match":
+        candidates = cfg.get("candidates", [])
+        prompt = (f"Match a product to image URLs. Product: {json.dumps({'sku': sku, 'name': data.get('name','')})}. "
+                  f"Candidates: {json.dumps(candidates)}. Return strict JSON {{\"sku\": \"url\"}}.")
+        r = _complete(provider, prompt, ctx.get("tenant_id", ""), "ai_resolve_images")
+        try:
+            mapping = json.loads(_extract_json(r["text"]))
+        except Exception:
+            ctx.setdefault("violations", []).append({
+                "rule_id": "ai_low_confidence", "severity": "minor",
+                "message": "AI image match returned unparseable JSON — ignored",
+            })
+            return data
+        if isinstance(mapping, dict):
+            url = mapping.get("url") or mapping.get(sku)
+            if url:
+                proposed = ctx.setdefault("_proposed_image_matches", {})
+                proposed[sku] = url  # PROPOSED only — human review required
+    else:  # generate
+        svc = ctx.get("image_service")
+        if svc is None:
+            return data
+        prompt = (f"Propose generation parameters for a product image. "
+                  f"Product: {json.dumps({'sku': sku, 'name': data.get('name','')})}. "
+                  f"Return strict JSON {{\"prompt\": \"...\"}}.")
+        r = _complete(provider, prompt, ctx.get("tenant_id", ""), "ai_resolve_images")
+        try:
+            gen_prompt = (json.loads(_extract_json(r["text"])) or {}).get("prompt") or r["text"]
+        except Exception:
+            gen_prompt = r["text"]  # provider returned free-form generation params
+        try:
+            blob = PlaceholderGenerator.generate(sku, gen_prompt or f"product image for {sku}")
+            # store the blob only — binding to product.images happens via human review
+            # (same governance as llm_match_supplier: AI proposes, humans apply)
+            stored = svc.store_blob(ctx.get("tenant_id", ""), sku, blob)
+            data.setdefault("_ai_meta", {})["images_proposed"] = {
+                "url": stored["url"], "sha256": stored["sha256"], "model": r["model"]}
+        except ImageError as e:
+            ctx.setdefault("violations", []).append({
+                "rule_id": "ai_low_confidence", "severity": "minor",
+                "message": f"AI image generation failed: {e}",
+            })
+    return data
+
+
+RichOperatorRegistry.register("ai_resolve_images", ai_resolve_images,
                               category="ai", is_deterministic=False,
                               side_effects=True, security_level="elevated")

@@ -65,6 +65,25 @@ class ImageService:
         return {"url": rel_url, "sha256": digest, "size": len(data),
                 "mime": mime, "filename": fname, "sku": sku}
 
+    def store_blob(self, tenant_id: str, sku: str, data: bytes) -> Dict[str, Any]:
+        """Store image bytes WITHOUT binding to any product (AI-proposed images).
+        Dedup by SHA-256, same as store_image. Binding goes through human review."""
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise ImageError(f"Image exceeds max {MAX_UPLOAD_BYTES} bytes")
+        mime = self._detect_mime(data)
+        if mime is None:
+            raise ImageError("Unsupported image format")
+        digest = hashlib.sha256(data).hexdigest()
+        tdir = os.path.join(self.media_root, tenant_id)
+        os.makedirs(tdir, exist_ok=True)
+        ext = mime.split("/")[1]
+        fname = f"{sku}-{digest[:12]}.{ext}"
+        path = os.path.join(tdir, fname)
+        with open(path, "wb") as f:
+            f.write(data)
+        return {"url": f"/media/{tenant_id}/{fname}", "sha256": digest,
+                "size": len(data), "mime": mime, "filename": fname}
+
     def store_many(self, tenant_id: str, sku: str, blobs: List[bytes]) -> List[Dict[str, Any]]:
         return [self.store_image(tenant_id, sku, b) for b in blobs]
 
@@ -128,3 +147,19 @@ class ImageService:
 
 class ImageError(Exception):
     pass
+
+
+class PlaceholderGenerator:
+    """Deterministic offline placeholder generator (AI-resolve contract).
+    Real image-generation providers plug in via the same contract later."""
+
+    @staticmethod
+    def generate(sku: str, prompt: str = "") -> bytes:
+        from PIL import Image
+        import io
+        digest = hashlib.sha256(f"{sku}:{prompt}".encode()).hexdigest()
+        color = tuple(int(digest[i:i+2], 16) for i in (0, 2, 4))
+        img = Image.new("RGB", (512, 512), color)
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
