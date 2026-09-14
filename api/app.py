@@ -30,6 +30,7 @@ from core.models import Tenant as _TenantModel  # noqa
 
 _auth: AuthService = None
 _users: "UserService" = None
+_webhooks = None
 
 
 def get_auth() -> AuthService:
@@ -65,6 +66,14 @@ def get_users() -> "UserService":
     if _users is None:
         _users = UserService(persistence)
     return _users
+
+
+def get_webhooks():
+    global _webhooks
+    if _webhooks is None:
+        from services.webhooks import WebhookService
+        _webhooks = WebhookService(persistence)
+    return _webhooks
 
 
 def require_scope(scope: str):
@@ -110,6 +119,61 @@ class MappingIn(BaseModel):
     source_value: str
     normalized: str
     field: str
+
+
+# ---------- webhooks ----------
+def _tenant_id_of(info: dict) -> str:
+    return info["tenant_id"]
+
+
+@app.post("/webhooks", tags=["webhooks"])
+def create_webhook(url: str = Query(...), min_score: int = Query(75, ge=0, le=100),
+                   tenant: str = "default",
+                   persistence: PersistenceService = Depends(get_persistence),
+                   info: dict = Depends(require_scope("keys:manage"))):
+    """Subscribe to quality-drop notifications for this tenant."""
+    _enforce_tenant(info, tenant)
+    try:
+        return get_webhooks().subscribe(persistence.get_or_create_tenant(tenant).id,
+                                        url, min_score)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/webhooks", tags=["webhooks"])
+def list_webhooks(tenant: str = "default",
+                  persistence: PersistenceService = Depends(get_persistence),
+                  info: dict = Depends(require_scope("keys:manage"))):
+    _enforce_tenant(info, tenant)
+    return get_webhooks().list_subscriptions(persistence.get_or_create_tenant(tenant).id)
+
+
+@app.delete("/webhooks/{webhook_id}", tags=["webhooks"])
+def delete_webhook(webhook_id: str, tenant: str = "default",
+                   persistence: PersistenceService = Depends(get_persistence),
+                   info: dict = Depends(require_scope("keys:manage"))):
+    _enforce_tenant(info, tenant)
+    ok = get_webhooks().unsubscribe(persistence.get_or_create_tenant(tenant).id, webhook_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Webhook not found")
+    return {"unsubscribed": webhook_id}
+
+
+@app.get("/webhooks/{webhook_id}/deliveries", tags=["webhooks"])
+def webhook_deliveries(webhook_id: str, tenant: str = "default",
+                       persistence: PersistenceService = Depends(get_persistence),
+                       info: dict = Depends(require_scope("keys:manage"))):
+    _enforce_tenant(info, tenant)
+    from sqlalchemy import select
+    from services.webhooks import WebhookDelivery
+    t = persistence.get_or_create_tenant(tenant)
+    with persistence.session() as s:
+        rows = s.scalars(select(WebhookDelivery).where(
+            WebhookDelivery.tenant_id == t.id,
+            WebhookDelivery.subscription_id == webhook_id).limit(50)).all()
+        return [{"event": d.event_type, "success": d.success, "attempts": d.attempts,
+                 "status_code": d.status_code, "error": d.error,
+                 "created_at": d.created_at.isoformat()} for d in rows]
 
 
 # ---------- auth (users & sessions) ----------
@@ -212,6 +276,12 @@ def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv"),
         raise HTTPException(status_code=403, detail="Key not valid for this tenant")
     try:
         result = ingestion.ingest(body, slug)
+        try:
+            fired = get_webhooks().check_and_notify(
+                slug, _tenant_id_of(info), result.get("summary", {}))
+            result["webhooks_fired"] = len(fired)
+        except Exception as e:  # webhook failure must never break ingest
+            logger.warning("Webhook dispatch failed: %s", e)
     except IngestionError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return result
