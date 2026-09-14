@@ -11,3 +11,7 @@ class Repository:
         filtered_data = {k: v for k, v in data.items() if k in valid_fields}
         
         return self.adapter.save_entity(table_name, filtered_data, tenant_id)
+
+    def save_quality_score(self, tenant_id, sku, score):
+        """Persist a computed per-product quality score (tenant-scoped)."""
+        return self.adapter.save_quality_score(tenant_id, sku, score)

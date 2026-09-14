@@ -34,3 +34,8 @@ class GenericDBService:
         
         logger.info(f"Executing Upsert Query against table [{clean_table}] for Tenant [{tenant_id}]")
         return {"status": "upserted", "table": clean_table, "sku": payload.get("sku")}
+
+    def save_quality_score(self, tenant_id, sku, score):
+        clean_table = self.sanitize_table_name("pim_products")
+        logger.info(f"Persisting quality_score={score} for sku={sku} (tenant={tenant_id})")
+        return {"status": "updated", "table": clean_table, "sku": sku, "quality_score": score}
