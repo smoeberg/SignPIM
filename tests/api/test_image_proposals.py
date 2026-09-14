@@ -59,19 +59,14 @@ def _seed_product_with_proposal(env):
                     content=PNG, headers={"Content-Type": "image/png"}).json()
     # unbind it — we only want the blob stored, then hand-plant a proposal
     c.delete("/products/100245/images", params={"tenant": "demo", "url": stored["url"]})
-    from sqlalchemy import select
-    from core.models import Product
     tid = app_mod.persistence.get_or_create_tenant("demo").id
-    with app_mod.persistence.session() as s:
-        row = s.scalars(select(Product).where(
-            Product.tenant_id == tid, Product.sku == "100245")).first()
-        data = dict(row.data or {})
-        ai = dict(data.get("_ai_meta") or {})
-        ai["images_proposed"] = [{"url": stored["url"], "sha256": stored["sha256"],
-                                  "proposed_by": "ai_resolve_images"}]
-        data["_ai_meta"] = ai
-        row.data = data
-        s.add(row)
+    prod = app_mod.persistence.get_product(tid, "100245")
+    data = dict(prod["data"] or {})
+    ai = dict(data.get("_ai_meta") or {})
+    ai["images_proposed"] = [{"url": stored["url"], "sha256": stored["sha256"],
+                              "proposed_by": "ai_resolve_images"}]
+    data["_ai_meta"] = ai
+    app_mod.persistence.upsert_product(tid, "100245", data)
     return stored, stored["sha256"]
 
 

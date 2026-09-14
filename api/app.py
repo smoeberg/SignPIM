@@ -308,7 +308,8 @@ def list_image_proposals(sku: str, tenant: str = "default",
     p = persistence.get_product(t.id, sku)
     if p is None:
         raise HTTPException(status_code=404, detail=f"Product {sku} not found")
-    proposals = ((p.data or {}).get("_ai_meta") or {}).get("images_proposed") or []
+    proposals = (((p.get("data") or {}) if isinstance(p, dict) else (p.data or {}))
+                 .get("_ai_meta") or {}).get("images_proposed") or []
     if isinstance(proposals, dict):
         candidates = [proposals]
     else:
@@ -336,7 +337,8 @@ def apply_image_proposal(sku: str, tenant: str = "default",
         image_service.read_blob(url)
     except (ImageError, OSError):
         raise HTTPException(status_code=404, detail="Unknown proposal for this product")
-    proposals = ((p.data or {}).get("_ai_meta") or {}).get("images_proposed") or []
+    proposals = (((p.get("data") or {}) if isinstance(p, dict) else (p.data or {}))
+                 .get("_ai_meta") or {}).get("images_proposed") or []
     if isinstance(proposals, dict):
         candidates = [proposals]
     else:
@@ -345,7 +347,8 @@ def apply_image_proposal(sku: str, tenant: str = "default",
     if match is None:
         raise HTTPException(status_code=404, detail="Unknown proposal for this product")
     stored = image_service.bind_existing(t.id, sku, url)
-    data = dict(p.data or {})
+    fresh = persistence.get_product(t.id, sku)
+    data = dict((fresh.get("data") or {}) if isinstance(fresh, dict) else (fresh.data or {}))
     ai = dict(data.get("_ai_meta") or {})
     raw = ai.get("images_proposed")
     if isinstance(raw, dict):
@@ -361,7 +364,7 @@ def apply_image_proposal(sku: str, tenant: str = "default",
         else:
             ai.pop("images_proposed", None)
     data["_ai_meta"] = ai
-    persistence.update_product(t.id, sku, {"data": data})
+    persistence.upsert_product(t.id, sku, data)
     return {"status": "applied", "sku": sku, **stored}
 
 

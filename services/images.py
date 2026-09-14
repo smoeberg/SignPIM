@@ -65,6 +65,12 @@ class ImageService:
         return {"url": rel_url, "sha256": digest, "size": len(data),
                 "mime": mime, "filename": fname, "sku": sku}
 
+    def bind_existing(self, tenant_id: str, sku: str, url: str) -> Dict[str, Any]:
+        """Bind an already-stored media URL to a product (human apply path only).
+        Idempotent; recomputes score. Never called by AI operators."""
+        self._bind(tenant_id, sku, url)
+        return {"url": url, "sku": sku, "bound": True}
+
     def store_blob(self, tenant_id: str, sku: str, data: bytes) -> Dict[str, Any]:
         """Store image bytes WITHOUT binding to any product (AI-proposed images).
         Dedup by SHA-256, same as store_image. Binding goes through human review."""
