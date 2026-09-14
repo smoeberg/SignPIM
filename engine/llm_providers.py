@@ -183,3 +183,59 @@ def resolve_provider_from_settings(settings: Dict[str, Any]) -> LLMProvider:
     name = cfg.get("provider") or os.environ.get("SIGNPIM_LLM_PROVIDER", "mock")
     kwargs = {k: v for k, v in cfg.items() if k != "provider"}
     return LLMProviderRegistry.resolve(name, **kwargs)
+
+
+class AnthropicProvider(LLMProvider):
+    """Opt-in cloud provider (Claude). API key from env — never code."""
+
+    name = "anthropic"
+    deterministic = False
+    API_URL = "https://api.anthropic.com/v1/messages"
+    API_VERSION = "2023-06-01"
+
+    def __init__(self, api_key: Optional[str] = None, model: str = "claude-3-5-haiku-20241022",
+                 timeout_s: int = 30, max_retries: int = 2):
+        self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
+        self.model = model
+        self.timeout_s = timeout_s
+        self.max_retries = max_retries
+
+    def complete(self, prompt: str, *, system: str = "", temperature: float = 0.0,
+                 max_tokens: int = 512) -> Dict[str, Any]:
+        if not self.api_key:
+            raise RuntimeError("AnthropicProvider: no API key (set ANTHROPIC_API_KEY)")
+        import urllib.request
+        import urllib.error
+        body = json.dumps({
+            "model": self.model, "max_tokens": max_tokens, "temperature": temperature,
+            "messages": ([{"role": "user", "content": f"{system}\n\n{prompt}"}]
+                         if system else [{"role": "user", "content": prompt}]),
+        }).encode()
+        req = urllib.request.Request(self.API_URL, data=body, headers={
+            "Content-Type": "application/json",
+            "x-api-key": self.api_key,
+            "anthropic-version": self.API_VERSION,
+        })
+        last_err: Exception = ConnectionError("no attempt")
+        for attempt in range(self.max_retries + 1):
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_s) as resp:
+                    payload = json.loads(resp.read())
+                usage = payload.get("usage", {})
+                text = "".join(b.get("text", "") for b in payload.get("content", [])
+                               if b.get("type") == "text")
+                return {"text": text,
+                        "tokens_in": usage.get("input_tokens", 0),
+                        "tokens_out": usage.get("output_tokens", 0),
+                        "model": payload.get("model", self.model)}
+            except urllib.error.HTTPError as e:
+                if 400 <= e.code < 500 and e.code not in (408, 429):
+                    raise RuntimeError(f"Anthropic HTTP {e.code}: {e.read()[:200]}") from e
+                last_err = e
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+            time.sleep(0.5 * (attempt + 1))
+        raise RuntimeError(f"Anthropic call failed after retries: {last_err}") from last_err
+
+
+LLMProviderRegistry.register(AnthropicProvider)
