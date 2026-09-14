@@ -937,6 +937,47 @@
         }
       }
     },
+    "/llm/usage": {
+      "get": {
+        "tags": [
+          "ai"
+        ],
+        "summary": "Llm Usage",
+        "operationId": "llm_usage_llm_usage_get",
+        "parameters": [
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/keys/{key_id}": {
       "delete": {
         "tags": [
