@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 from core.persistence import PersistenceService
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
+from services.images import ImageService, ImageError
 
 logger = logging.getLogger("signpim.api")
 
@@ -51,6 +52,26 @@ LLMCallLogger.bind(persistence)
 kernel = PlatformKernel(meta_dir="meta")
 kernel.bootstrap()
 ingestion = CSVIngestionService(persistence, kernel)
+
+
+def _rescore_product(tenant_id: str, sku: str) -> None:
+    """Re-run the quality workflow for one product after a data change (e.g. image bind)."""
+    from sqlalchemy import select
+    from core.models import Product
+    with persistence.session() as s:
+        p = s.scalars(select(Product).where(
+            Product.tenant_id == tenant_id, Product.sku == sku)).first()
+        if p is None:
+            return
+        stored = dict(p.data or {}); stored["sku"] = sku
+    result = kernel.run_workflow("full_sync", stored, tenant_id)
+    persistence.save_quality_score(tenant_id, sku,
+                                   result["data"].get("quality_score"))
+
+
+image_service = ImageService(persistence, rescorer=_rescore_product)
+media_root = image_service.media_root
+os.makedirs(media_root, exist_ok=True)
 
 
 def get_persistence() -> PersistenceService:
@@ -277,11 +298,52 @@ def update_user(user_id: str, role: str = Query(None), active: bool = Query(None
 # ---------- dashboard ----------
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
 
+@app.post("/products/{sku}/images", tags=["images"])
+async def upload_image(sku: str, request: Request, tenant: str = "default",
+                       info: dict = Depends(require_scope("products:write"))):
+    """Upload one image for a product (raw bytes or multipart). Score recomputed."""
+    _enforce_tenant(info, tenant)
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="Empty body — send raw image bytes")
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        stored = image_service.store_image(t.id, sku, body)
+    except ImageError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"status": "stored", **stored}
+
+
+@app.get("/products/{sku}/images", tags=["images"])
+def list_images(sku: str, tenant: str = "default",
+                info: dict = Depends(require_scope("products:read"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    from sqlalchemy import select
+    from core.models import Product
+    with persistence.session() as s:
+        p = s.scalars(select(Product).where(
+            Product.tenant_id == t.id, Product.sku == sku)).first()
+        if p is None:
+            raise HTTPException(status_code=404, detail="Unknown product")
+        return {"sku": sku, "images": (p.data or {}).get("images") or []}
+
+
+@app.delete("/products/{sku}/images", tags=["images"])
+def remove_image(sku: str, url: str = Query(...), tenant: str = "default",
+                 info: dict = Depends(require_scope("products:write"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    image_service.unbind(t.id, sku, url)
+    return {"status": "removed", "sku": sku, "url": url}
+
+
 @app.get("/", include_in_schema=False)
 def dashboard():
     return FileResponse(os.path.join(WEB_DIR, "index.html"))
 
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+app.mount("/media", StaticFiles(directory=media_root, check_dir=False), name="media")
 
 
 # ---------- health ----------

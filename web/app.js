@@ -34,14 +34,26 @@ function renderProducts(products) {
     const tr = document.createElement('tr');
     const d = p.data || {};
     const score = p.quality_score;
+    const imgs = (d.images || []);
     tr.innerHTML = `
       <td>${d.sku ?? p.sku ?? ''}</td>
       <td>${d.name ?? ''}</td>
       <td>${d.price != null ? d.price.toFixed(2) : ''}</td>
       <td style="color:${scoreColor(score)};font-weight:600">${score != null ? score.toFixed(1) : '–'}</td>
-      <td>${p.version ?? ''}</td>`;
+      <td>${imgs.length ? imgs.map(u => `<img src="${u}" class="thumb" loading="lazy">`).join('') : '<span class="noimg">–</span>'}</td>
+      <td>${p.version ?? ''}</td>
+      <td><input type="file" accept="image/*" onchange="uploadImage(this, '${p.sku}')"></td>`;
     body.appendChild(tr);
   }
+}
+
+async function uploadImage(input, sku) {
+  const f = input.files[0];
+  if (!f) return;
+  const r = await fetch(`/products/${encodeURIComponent(sku)}/images?tenant=${tenant()}`,
+                        { method: 'POST', headers: headers(), body: f });
+  if (r.ok) { loadAll(); }
+  else { const j = await r.json().catch(() => ({})); alert(`Upload fejlede (${r.status}): ${j.detail || ''}`); }
 }
 
 async function loadAll() {
@@ -57,6 +69,7 @@ async function loadAll() {
     else $('score-value').textContent = '–';
     if (pRes.ok) renderProducts(await pRes.json());
     else $('products-body').innerHTML = `<tr><td colspan="5">Fejl: ${pRes.status}</td></tr>`;
+  updateWhoami();
   } catch (e) {
     $('products-body').innerHTML = `<tr><td colspan="5">Netværksfejl: ${e}</td></tr>`;
   }
@@ -118,3 +131,54 @@ $('logout-btn').onclick = async () => {
 };
 
 loadAll();
+
+
+/* ---------- Session login (multi-user) ---------- */
+async function doLogin() {
+  const t = tenant(), email = $('login-email').value.trim(), pw = $('login-password').value;
+  const r = await fetch(`/auth/login?tenant=${t}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ email, password: pw }),
+  });
+  if (r.ok) {
+    const j = await r.json();
+    sessionStorage.setItem('spim_token', j.token);
+    sessionStorage.setItem('spim_who', j.email || email);
+    loadAll();
+  } else { alert('Login fejlede: ' + r.status); }
+}
+
+function doLogout() {
+  sessionStorage.removeItem('spim_token');
+  sessionStorage.removeItem('spim_who');
+  location.reload();
+}
+
+async function updateWhoami() {
+  try {
+    const r = await fetch('/auth/me', { headers: headers() });
+    if (r.ok) {
+      const j = await r.json();
+      $('whoami').textContent = `${j.email || 'user'} · ${j.role || ''}`;
+      $('user-badge').style.display = 'inline-flex';
+      $('logout-btn2').classList.remove('hidden');
+      $('login-toggle').classList.add('hidden');
+    } else {
+      $('user-badge').style.display = 'none';
+      $('logout-btn2').classList.add('hidden');
+      $('login-toggle').classList.remove('hidden');
+    }
+  } catch { /* offline */ }
+}
+
+/* ---------- ERP export ---------- */
+function downloadExport() {
+  const fmt = $('export-format').value || 'csv';
+  window.open(`/export/${tenant()}?fmt=${fmt}`, '_blank');
+}
+
+$('login-toggle').addEventListener('click', () => $('login-panel').classList.toggle('hidden'));
+$('login-btn').addEventListener('click', doLogin);
+$('logout-btn').addEventListener('click', doLogout);
+$('logout-btn2').addEventListener('click', doLogout);
+$('export-btn').addEventListener('click', downloadExport);

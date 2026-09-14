@@ -42,3 +42,15 @@ main { display: grid; gap: 1rem; grid-template-columns: 320px 1fr; }
   display: grid; gap: .5rem; }
 .login-panel label { font-size: .85rem; color: var(--muted); display: grid; gap: .25rem; }
 .whoami { color: var(--muted); font-size: .85rem; }
+
+/* Images column */
+.thumb { width: 34px; height: 34px; border-radius: 5px; object-fit: cover; vertical-align: middle; }
+.noimg { color: #666; }
+#products-table input[type="file"] { max-width: 120px; font-size: 11px; }
+#user-badge { background: #22c55e22; border: 1px solid #22c55e; color: #22c55e;
+  border-radius: 999px; padding: 4px 12px; align-items: center; }
+#export-btn { background: #2563eb; border: none; color: white; border-radius: 6px;
+  padding: 6px 12px; cursor: pointer; }
+#export-btn:hover { background: #1d4ed8; }
+select#export-format { background: var(--bg-card, #16181d); color: #eee; border: 1px solid #333;
+  border-radius: 6px; padding: 4px 8px; }
