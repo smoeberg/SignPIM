@@ -85,6 +85,24 @@ class CSVIngestionService:
         # Load tenant config ONCE per ingest (was: one query per row)
         mappings = self.persistence.get_mappings(tenant_id)
         rules = self.persistence.active_rules(tenant_id)
+        tenant_settings = dict(tenant.settings or {}) if tenant else {}
+        # Merge DB-backed LLM config (tenant overrides global overrides env).
+        # tenant settings['llm'] explicitly set -> wins; otherwise DB config fills in.
+        db_llm = {}
+        try:
+            from core.config_service import ConfigService
+            cs = ConfigService(self.persistence)
+            for k in ("provider", "model", "ollama_host", "api_key", "api_key_anthropic", "api_key_openai"):
+                v = cs.resolve(f"llm.{k}", tenant_id=tenant_id)
+                if v is not None:
+                    # providers take a single `api_key` kwarg
+                    db_llm["api_key" if k.startswith("api_key") else k] = v
+        except Exception:
+            pass  # config table missing (old DB) -> env fallback as before
+        if db_llm:
+            merged = dict(db_llm)
+            merged.update(tenant_settings.get("llm") or {})
+            tenant_settings["llm"] = merged
 
         processed, errors, pending = [], [], []
         for i, row in enumerate(rows):
@@ -92,7 +110,7 @@ class CSVIngestionService:
                 normalized = self._apply_mappings(mappings, row)
                 result = self.kernel.run_workflow(
                     workflow, normalized, tenant_id,
-                    tenant_settings=tenant.settings if tenant else {})
+                    tenant_settings=tenant_settings)
                 pending.append({"sku": row["sku"], "data": result["data"],
                                 "quality_score": result["data"].get("quality_score")})
                 processed.append({

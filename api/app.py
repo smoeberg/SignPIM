@@ -557,21 +557,28 @@ def poll_feed(slug: str, mode: str = Query("local", pattern="^(local|sftp)$"),
     from services.feed_import import LocalFeedImporter, SFTPFeedImporter
     if mode == "sftp":
         import os
-        host = os.environ.get("SIGNPIM_SFTP_HOST")
+        # Config chain: tenant DB config -> global DB config -> env
+        from core.config_service import ConfigService
+        cfg = ConfigService(persistence)
+        tid = persistence.get_or_create_tenant(slug).id
+        def _sftp(key, env_name, default=None):
+            v = cfg.resolve(key, tenant_id=tid)
+            return v if v is not None else os.environ.get(env_name, default)
+        host = _sftp("sftp.host", "SIGNPIM_SFTP_HOST")
         if not host:
             raise HTTPException(status_code=503,
-                                detail="SFTP not configured: set SIGNPIM_SFTP_HOST")
-        remote_dir = os.environ.get("SIGNPIM_SFTP_REMOTE_DIR", "/out")
-        user = os.environ.get("SIGNPIM_SFTP_USER", "signpim")
-        password = os.environ.get("SIGNPIM_SFTP_PASSWORD")
+                                detail="SFTP not configured: set sftp.host (admin config) or SIGNPIM_SFTP_HOST")
+        remote_dir = _sftp("sftp.remote_path", "SIGNPIM_SFTP_REMOTE_PATH", "/out")
+        user = _sftp("sftp.user", "SIGNPIM_SFTP_USER", "signpim")
+        password = _sftp("sftp.password", "SIGNPIM_SFTP_PASSWORD")
         key_path = os.environ.get("SIGNPIM_SFTP_KEY_PATH")
         if not password and not key_path:
             raise HTTPException(status_code=503,
-                                detail="SFTP needs SIGNPIM_SFTP_PASSWORD or SIGNPIM_SFTP_KEY_PATH")
+                                detail="SFTP needs sftp.password (admin config) or SIGNPIM_SFTP_PASSWORD/SIGNPIM_SFTP_KEY_PATH")
         importer = SFTPFeedImporter(persistence, ingestion)
         return importer.poll(slug, host=host, remote_dir=remote_dir, username=user,
                              password=password, key_path=key_path,
-                             port=int(os.environ.get("SIGNPIM_SFTP_PORT", "22")))
+                             port=int(_sftp("sftp.port", "SIGNPIM_SFTP_PORT", "22")))
     if not directory:
         raise HTTPException(status_code=400, detail="mode=local requires 'directory'")
     importer = LocalFeedImporter(persistence, ingestion)

@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 
 from sqlalchemy import Column, String, Text, Boolean, Index, or_
 
-from core.models import Base
+from core.models import Base, AppConfig
 
 
 def _fernet():
@@ -28,18 +28,6 @@ def _fernet():
         key = base64.urlsafe_b64encode(
             (b"signpim-config-" + key.encode().ljust(32, b"-")[:32])[:32])
     return Fernet(key)
-
-
-class AppConfig(Base):
-    """One config entry. tenant_id NULL = global. Secrets encrypted at rest."""
-    __tablename__ = "app_config"
-    id = Column(String(36), primary_key=True, default=lambda: __import__("uuid").uuid4().hex)
-    tenant_id = Column(String(36), nullable=True, index=True)  # NULL = global
-    key = Column(String(128), nullable=False)
-    value = Column(Text, nullable=False)          # JSON-encoded; ciphertext if secret
-    is_secret = Column(Boolean, nullable=False, default=False)
-    updated_by = Column(String(255), nullable=True)
-    __table_args__ = (Index("idx_app_config", "tenant_id", "key", unique=True),)
 
 
 class ConfigService:

@@ -18,6 +18,19 @@ Base = declarative_base()
 from core._orm import _uuid, _now  # noqa: F401
 
 
+class AppConfig(Base):
+    """One config entry. tenant_id NULL = global. Secrets encrypted at rest."""
+    __tablename__ = "app_config"
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), nullable=True, index=True)  # NULL = global
+    key = Column(String(128), nullable=False)
+    value = Column(Text, nullable=False)          # JSON-encoded; ciphertext if secret
+    is_secret = Column(Boolean, nullable=False, default=False)
+    updated_by = Column(String(255), nullable=True)
+    __table_args__ = (Index("idx_app_config", "tenant_id", "key", unique=True),)
+
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     id = Column(String(36), primary_key=True, default=_uuid)
