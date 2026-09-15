@@ -54,3 +54,21 @@ main { display: grid; gap: 1rem; grid-template-columns: 320px 1fr; }
 #export-btn:hover { background: #1d4ed8; }
 select#export-format { background: var(--bg-card, #16181d); color: #eee; border: 1px solid #333;
   border-radius: 6px; padding: 4px 8px; }
+
+/* ---------- Admin ---------- */
+.tabs { display: flex; gap: .5rem; margin: 1rem 0; }
+.tab { padding: .45rem 1.2rem; border: 1px solid #cbd5e1; background: #fff; border-radius: 8px 8px 0 0; cursor: pointer; font-weight: 600; }
+.tab.active { background: #1e293b; color: #fff; border-color: #1e293b; }
+.view { display: block; }
+.view.hidden, .hidden { display: none; }
+.cfg-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: .6rem; margin: .8rem 0; }
+.cfg-item { display: flex; flex-direction: column; gap: .2rem; font-size: .85rem; }
+.cfg-item input[type="text"], .cfg-item input[type="password"], .cfg-item input[type="number"], .cfg-item input.cfg-json { width: 100%; padding: .35rem .5rem; border: 1px solid #cbd5e1; border-radius: 4px; font-family: monospace; font-size: .8rem; }
+.row { display: flex; gap: .5rem; align-items: center; margin: .5rem 0; flex-wrap: wrap; }
+.row input { padding: .35rem .5rem; border: 1px solid #cbd5e1; border-radius: 4px; }
+table { width: 100%; border-collapse: collapse; margin: .5rem 0; }
+th, td { text-align: left; padding: .35rem .6rem; border-bottom: 1px solid #e2e8f0; font-size: .85rem; }
+th { background: #f1f5f9; }
+.del { background: #fee2e2; border: none; border-radius: 4px; cursor: pointer; padding: .15rem .5rem; }
+.hint { color: #64748b; font-size: .8rem; }
+button { cursor: pointer; }

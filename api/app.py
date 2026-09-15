@@ -704,3 +704,38 @@ def admin_delete_config(key: str, tenant: str = "default",
     if not ok:
         raise HTTPException(status_code=404, detail="Config key not found")
     return {"deleted": key}
+
+
+# ---------- normalization mappings ----------
+
+@app.get("/admin/mappings", tags=["admin"])
+def admin_list_mappings(tenant: str = "default",
+                        persistence: PersistenceService = Depends(get_persistence),
+                        info: dict = Depends(require_scope("keys:manage"))):
+    _require_admin(info)
+    t = persistence.get_or_create_tenant(tenant)
+    return persistence.get_mappings(t.id)
+
+
+@app.post("/admin/mappings", tags=["admin"])
+def admin_add_mapping(body: dict, tenant: str = "default",
+                      persistence: PersistenceService = Depends(get_persistence),
+                      info: dict = Depends(require_scope("keys:manage"))):
+    _require_admin(info)
+    missing = [k for k in ("field", "source_value", "normalized") if k not in body]
+    if missing:
+        raise HTTPException(status_code=422, detail=f"missing fields: {missing}")
+    t = persistence.get_or_create_tenant(tenant)
+    m = persistence.add_mapping(t.id, body["source_value"], body["normalized"], body["field"])
+    return m
+
+
+@app.delete("/admin/mappings/{mapping_id}", tags=["admin"])
+def admin_delete_mapping(mapping_id: str, tenant: str = "default",
+                         persistence: PersistenceService = Depends(get_persistence),
+                         info: dict = Depends(require_scope("keys:manage"))):
+    _require_admin(info)
+    t = persistence.get_or_create_tenant(tenant)
+    if not persistence.delete_mapping(t.id, mapping_id):
+        raise HTTPException(status_code=404, detail="Mapping not found")
+    return {"deleted": mapping_id}

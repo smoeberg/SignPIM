@@ -37,7 +37,11 @@
   <pre id="login-result" class="hidden"></pre>
 </div>
 
-<main>
+<nav class="tabs">
+    <button class="tab active" data-view="dashboard">Dashboard</button>
+    <button class="tab" data-view="admin">⚙ Admin</button>
+  </nav>
+  <main id="view-dashboard" class="view">
   <section id="quality-card" class="card">
     <h2>Datakvalitet</h2>
     <div id="score-ring" class="ring"><span id="score-value">–</span></div>
@@ -64,6 +68,29 @@
     <pre id="ingest-result"></pre>
   </section>
 </main>
+  <main id="view-admin" class="view hidden">
+    <section class="card">
+      <h2>Tenant-konfiguration</h2>
+      <p class="hint">Indstillinger der styrer feed-parsing, SFTP-polling og LLM. Gemmes i DB og træder i kraft næste poll.</p>
+      <div id="cfg-fields" class="cfg-grid"></div>
+      <div class="row">
+        <button id="cfg-save">💾 Gem konfiguration</button>
+        <button id="cfg-reload">↻ Genindlæs</button>
+        <span id="cfg-status" class="hint"></span>
+      </div>
+    </section>
+    <section class="card">
+      <h2>Kolonne-mapping (feed → kanonisk)</h2>
+      <div class="row"><input id="cm-src" placeholder="leverandør-kolonne (f.eks. part_no)"><span>→</span><input id="cm-dst" placeholder="kanonisk felt (f.eks. sku)"><button id="cm-add">Tilføj</button></div>
+      <table id="cm-table"><thead><tr><th>Kilde</th><th>Mål</th><th></th></tr></thead><tbody id="cm-body"></tbody></table>
+    </section>
+    <section class="card">
+      <h2>Værdi-mapping (normalisering)</h2>
+      <div class="row"><input id="vm-field" placeholder="felt (f.eks. unit)" style="max-width:9rem"><input id="vm-src" placeholder="kildeværdi (f.eks. saet)"><span>→</span><input id="vm-dst" placeholder="normaliseret (f.eks. sæt)"><button id="vm-add">Tilføj</button></div>
+      <table id="vm-table"><thead><tr><th>Felt</th><th>Kilde</th><th>Normaliseret</th><th></th></tr></thead><tbody id="vm-body"></tbody></table>
+    </section>
+    <pre id="admin-log" class="hint"></pre>
+  </main>
 
 <script src="/static/app.js"></script>
 </body>

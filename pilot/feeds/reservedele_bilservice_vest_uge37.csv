@@ -1,0 +1,6 @@
+part_no;part_name;list_price;barcode;part_group;supplier;qty;unit;machine_brand;machine_model;oem_no
+BS-4412;Oliefilter 5.0 diesel;89,50;5701234123451;Filtre;Bilservice Vest;40;stk;Volvo;V60 D4;31392205
+BS-4413;Luftfilter V60;129;5701234123452;Filtre;Bilservice Vest;22;stk;Volvo;V60 D4;30636970
+BS-5501;Bremseklods for, sæt;549,95;;Bremser;Bilservice Vest;15;saet;VW;Golf VII 1.4 TSI;5Q0698151
+BS-5502;Stoedtaemper bag;899;;Undervogn;Bilservice Vest;6;stk;VW;Golf VII 1.4 TSI;5Q0513049F
+BS-6600;Tændrør iridium;79;5701234123455;Motor;Bilservice Vest;100;stk;Toyota;Corolla 1.8 Hybrid;90919-01247

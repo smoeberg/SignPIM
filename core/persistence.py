@@ -177,7 +177,8 @@ class PersistenceService:
             maps = s.scalars(
                 select(NormalizationMapping).where(NormalizationMapping.tenant_id == tenant_id)
             ).all()
-        return [{"field": m.field, "source_value": m.source_value, "normalized": m.normalized}
+        return [{"id": m.id, "field": m.field, "source_value": m.source_value,
+                "normalized": m.normalized}
                 for m in maps]
 
     def log_llm_call(self, tenant_id: str, operator: str, provider: str, model: str,
@@ -224,6 +225,14 @@ class PersistenceService:
             s.add(m)
             s.flush()
             return {"id": m.id, "source_value": m.source_value, "normalized": m.normalized}
+
+    def delete_mapping(self, tenant_id: str, mapping_id: int) -> bool:
+        with self.session() as s:
+            m = s.get(NormalizationMapping, mapping_id)
+            if m is None or m.tenant_id != tenant_id:
+                return False
+            s.delete(m)
+        return True
 
     def apply_mappings(self, tenant_id: str, data: Dict[str, Any]) -> Dict[str, Any]:
         """Normalizes field values through tenant mappings (e.g. supplier 'BLUE' → 'Blå')."""

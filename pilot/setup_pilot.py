@@ -52,6 +52,54 @@ PILOT_MAPPINGS = [  # value normalization: supplier value → canonical
 ]
 
 
+SPARE_SLUG = "bilservice-vest"
+SPARE_FEED = os.path.join(os.path.dirname(__file__), "feeds",
+                          "reservedele_bilservice_vest_uge37.csv")
+
+SPARE_SETTINGS = {
+    "feed_column_map": {
+        "part_no": "sku",
+        "part_name": "name",
+        "list_price": "price",
+        "barcode": "ean",
+        "part_group": "category",
+        "supplier": "supplier",
+        "qty": "stock_qty",
+        "unit": "unit",
+        "machine_brand": "machine_brand",
+        "machine_model": "machine_model",
+        "oem_no": "oem_no",
+    },
+    "export_column_map": {"name": "varetekst", "ean": "stregkode"},
+    "feed_price_includes_vat": True,
+    "llm": {"provider": "mock"},
+}
+
+SPARE_MAPPINGS = [
+    ("supplier", "Bilservice Vest", "Bilservice Vest A/S"),
+    ("unit", "saet", "sæt"),
+    ("category", "Undervogn", "Undervogn/chassi"),
+]
+
+
+def main_spare(persistence, ingestion):
+    """Reservedels-pilot: Bilservice Vest — feed med maskine/OEM-mapping."""
+    kernel_kwargs = {}
+    tenant = persistence.get_or_create_tenant(SPARE_SLUG, settings=SPARE_SETTINGS)
+    print(f"[S1] Spare-parts tenant '{SPARE_SLUG}' ready ({tenant.id[:8]}…)")
+    for field, source_value, normalized in SPARE_MAPPINGS:
+        persistence.add_mapping(tenant.id, source_value, normalized, field)
+    print(f"[S2] {len(SPARE_MAPPINGS)} spare-parts normalization mappings registered")
+    with open(SPARE_FEED) as f:
+        csv_content = f.read()
+    result = ingestion.ingest(csv_content, SPARE_SLUG)
+    print(f"[S3] Ingested {result['rows_ingested']} rows, {len(result['errors'])} errors")
+    for e in result["errors"]:
+        print(f"    row {e['row']} ({e.get('sku')}): {e['error']}")
+    print(f"[S4] Quality summary: {json.dumps(result['summary'], indent=2)[:300]}")
+    return result
+
+
 def main():
     dsn = os.environ.get("DATABASE_URL", "sqlite:///./pilot/pilot.db")
     persistence = PersistenceService(dsn=dsn)
@@ -93,6 +141,8 @@ def main():
     t_summary = persistence.tenant_quality_summary(tenant.id) \
         if hasattr(persistence, "tenant_quality_summary") else "n/a"
     print(f"[7] Done. Tenant summary: {t_summary}")
+
+    main_spare(persistence, ingestion)
 
 
 if __name__ == "__main__":
