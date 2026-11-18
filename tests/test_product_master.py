@@ -201,3 +201,22 @@ def test_partial_updates_preserve_unprovided_master_and_offer_fields(catalog):
         assert stored.active is False
         assert snapshots[-1].cost_price == 42.5
         assert snapshots[-1].stock_quantity == 9
+
+
+
+def test_supplier_credentials_must_be_referenced_not_embedded(catalog):
+    _, tenant_id, service = catalog
+    with pytest.raises(ProductMasterError, match="credential_ref"):
+        service.create_supplier(
+            tenant_id, "supplier-secret", "Supplier Secret", "adapter",
+            adapter_config={"api_key": "do-not-store-this"},
+        )
+
+
+def test_negative_supplier_cost_is_rejected(catalog):
+    _, tenant_id, service = catalog
+    supplier = service.create_supplier(tenant_id, "supplier-price", "Supplier Price", "adapter")
+    with pytest.raises(ProductMasterError, match="cannot be negative"):
+        service.upsert_supplier_offer(
+            supplier["id"], "NEGATIVE", {"sku": "NEGATIVE"}, cost_price="-1.00"
+        )
