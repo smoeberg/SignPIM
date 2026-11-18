@@ -898,7 +898,6 @@
             "required": true,
             "schema": {
               "type": "string",
-              "media_type": "text/csv",
               "title": "Body"
             }
           }
@@ -2297,7 +2296,7 @@
           },
           "price": {
             "type": "number",
-            "exclusiveMinimum": 0,
+            "exclusiveMinimum": 0.0,
             "title": "Price"
           },
           "ean": {
