@@ -1105,17 +1105,6 @@
             }
           },
           {
-            "name": "gtin",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 8,
-              "maxLength": 14,
-              "title": "Gtin"
-            }
-          },
-          {
             "name": "tenant",
             "in": "query",
             "required": false,
@@ -2408,17 +2397,6 @@
               }
             ],
             "title": "Supplier Product Id"
-          },
-          "product_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Product Id"
           },
           "normalized_data": {
             "additionalProperties": true,
