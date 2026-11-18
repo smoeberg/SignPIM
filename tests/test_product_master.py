@@ -101,6 +101,8 @@ def test_exact_gtin_match_links_offer_and_brand_mpn_only_proposes(catalog):
         supplier["id"], "SUP-GTIN", {"gtin": "4006381333931", "brand": "Example", "mpn": "MODEL-1"}
     )
     match = service.match_offer_by_gtin(offer["id"], "4006381333931")
+    repeated_match = service.match_offer_by_gtin(offer["id"])
+    assert repeated_match["id"] == match["id"]
     assert match["method"] == "gtin_exact"
     assert match["status"] == "confirmed"
     assert match["confidence"] == "1.0000"
@@ -139,3 +141,24 @@ def test_gtin_match_cannot_override_supplier_source_identity(catalog):
     )
     with pytest.raises(ProductMasterError, match="does not match supplier source data"):
         service.match_offer_by_gtin(offer["id"], "4006381333932")
+
+
+
+def test_gtin_match_does_not_silently_relink_offer(catalog):
+    _, tenant_id, service = catalog
+    supplier = service.create_supplier(tenant_id, "supplier-a", "Supplier A", "adapter_a")
+    first = service.upsert_product_master(
+        tenant_id, "MASTER-1", "First product", gtin="4006381333931"
+    )
+    service.upsert_product_master(
+        tenant_id, "MASTER-2", "Second product", gtin="5901234123457"
+    )
+    offer = service.upsert_supplier_offer(
+        supplier["id"], "SUP-1", {"gtin": "4006381333931"}
+    )
+    service.match_offer_by_gtin(offer["id"])
+    service.upsert_supplier_offer(
+        supplier["id"], "SUP-1", {"gtin": "5901234123457"}
+    )
+    with pytest.raises(ProductMasterError, match="already linked to a different master product"):
+        service.match_offer_by_gtin(offer["id"])
