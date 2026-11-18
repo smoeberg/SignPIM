@@ -93,12 +93,14 @@ def test_catalog_api_requires_review_to_apply_brand_mpn_match(client):
     }).json()
     offer = http.post(
         f"/catalog/suppliers/{supplier['id']}/offers?tenant=acme",
-        json={"supplier_sku": "REVIEW-1", "raw_data": {"sku": "REVIEW-1"}},
+        json={"supplier_sku": "REVIEW-1", "raw_data": {
+            "sku": "REVIEW-1", "brand": "Example", "mpn": "MODEL-REVIEW"
+        }},
     ).json()
 
     proposal_response = http.post(
         f"/catalog/offers/{offer['id']}/match-brand-mpn",
-        params={"tenant": "acme", "brand": "Example", "mpn": "MODEL-REVIEW"},
+        params={"tenant": "acme"},
     )
     assert proposal_response.status_code == 200, proposal_response.text
     proposal = proposal_response.json()[0]
