@@ -256,6 +256,21 @@ class ProductMasterService:
             ))
             if product is None:
                 return None
+            if offer.product_id and offer.product_id != product.id:
+                raise ProductMasterError(
+                    "offer is already linked to a different master product; review required"
+                )
+            existing_match = session.scalar(select(ProductMatch).where(
+                ProductMatch.offer_id == offer.id,
+                ProductMatch.product_id == product.id,
+                ProductMatch.method == "gtin_exact",
+                ProductMatch.status == "confirmed",
+            ))
+            if existing_match is not None:
+                return _as_dict(existing_match, [
+                    "id", "tenant_id", "offer_id", "product_id",
+                    "method", "confidence", "status", "evidence",
+                ])
             offer.product_id = product.id
             match = ProductMatch(
                 tenant_id=offer.tenant_id,
