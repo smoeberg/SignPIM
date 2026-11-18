@@ -77,3 +77,25 @@ curl -X POST "http://localhost:8000/tenants/acme/ingest?body=sku,name,price%0AAB
 ```bash
 python scripts/export_openapi.py docs/openapi.json
 ```
+
+
+## Canonical Product Master (new domain foundation)
+
+The canonical catalogue is being established independently of the original tenant/SKU feed record. New catalogue integrations use these domain objects:
+
+- **ProductMaster** is the canonical product identity and owns master SKU, GTIN, brand, manufacturer, MPN, canonical content, attributes and translations.
+- **Supplier** represents one supplier connection and its adapter identity.
+- **SupplierOffer** represents one supplier's SKU, price, currency, stock and source content. A single ProductMaster may have many offers from different suppliers.
+- **SupplierOfferSnapshot** records each observed supplier payload and commercial state.
+- **ProductMatch** records exact matches and human-review proposals.
+
+Supplier payloads are stored in raw_data; normalized values are stored separately in normalized_data. GTIN exact matches may be linked automatically. Brand/MPN matches remain proposals and never merge products automatically.
+
+The initial API is available under /catalog:
+
+- POST /catalog/suppliers
+- POST /catalog/products
+- POST /catalog/suppliers/{supplier_id}/offers
+- POST /catalog/offers/{offer_id}/match-gtin
+
+See [ADR-016](docs/adr/ADR-016_Product_Master_Supplier_Offer.md) for the domain decision. The previous /products and generic feed ingestion paths are legacy surfaces; new supplier adapters and sales-channel integrations must be built on the canonical model.
