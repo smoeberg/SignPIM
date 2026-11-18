@@ -658,8 +658,8 @@ def upsert_product(product: ProductIn, tenant: str = "default",
                    info: dict = Depends(require_scope("products:write"))):
     """Upsert a single product through the full_sync engine workflow."""
     data = product.model_dump(exclude_none=True)
-    result = kernel.run_workflow("full_sync", data, tenant_id=tenant)
     tenant_obj = persistence.get_or_create_tenant(tenant)
+    result = kernel.run_workflow("full_sync", data, tenant_id=tenant_obj.id)
     saved = persistence.upsert_product(
         tenant_obj.id, product.sku, result["data"],
         quality_score=result["data"].get("quality_score"),

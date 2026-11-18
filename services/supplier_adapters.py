@@ -14,9 +14,11 @@ from dataclasses import dataclass, field
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Mapping, Optional, Protocol, Sequence
 
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 
-from core.models import Supplier
+from core.models import Supplier, SupplierOffer
 from core.product_master import ProductMasterError, ProductMasterService
 
 
@@ -97,7 +99,7 @@ def _record(raw: Mapping[str, Any], config: Mapping[str, Any]) -> SupplierRecord
     price = _decimal_text(get("cost_price", "price"), "cost_price")
     quantity = _decimal_text(get("stock_quantity", "quantity"), "stock_quantity")
     normalized = {
-        key: get(key, *fallbacks)
+        key: _clean(get(key, *fallbacks))
         for key, fallbacks in {
             "gtin": ("ean",), "ean": ("gtin",), "brand": (),
             "mpn": ("manufacturer_part_number",),
@@ -108,7 +110,7 @@ def _record(raw: Mapping[str, Any], config: Mapping[str, Any]) -> SupplierRecord
     return SupplierRecord(
         supplier_sku=str(sku).strip(),
         raw_data=deepcopy(dict(raw)),
-        normalized_data={k: v for k, v in normalized.items() if v is not None},
+        normalized_data={k: v for k, v in normalized.items() if v not in (None, "")},
         supplier_product_id=_optional_text(get("supplier_product_id", "product_id")),
         supplier_url=_optional_text(get("supplier_url", "url")),
         title=_optional_text(get("title", "name")),
@@ -118,6 +120,10 @@ def _record(raw: Mapping[str, Any], config: Mapping[str, Any]) -> SupplierRecord
         stock_quantity=quantity,
         stock_status=_optional_text(get("stock_status")),
     )
+
+
+def _clean(value: Any) -> Any:
+    return value.strip() if isinstance(value, str) else value
 
 
 def _optional_text(value: Any) -> Optional[str]:
@@ -150,11 +156,15 @@ class CSVSupplierAdapter:
             raise SupplierAdapterError("supplier CSV contains duplicate headers")
         records = []
         for row_number, row in enumerate(reader, start=2):
+            # Header names are trimmed so field_map can address them; cell
+            # values are kept exactly as received (raw_data invariant).
             raw = {
-                str(key).strip(): value.strip() if isinstance(value, str) else value
+                str(key).strip(): value
                 for key, value in row.items() if key is not None
             }
-            if not any(value not in (None, "") for value in raw.values()):
+            if not any(
+                isinstance(value, str) and value.strip() for value in raw.values()
+            ):
                 continue
             try:
                 records.append(_record(raw, config))
@@ -246,10 +256,15 @@ class SupplierHubService:
             config = deepcopy(supplier.adapter_config or {})
 
         adapter = self.registry.resolve(adapter_key)
-        if content_type and content_type.casefold() not in {
-            adapter_key, "text/csv" if adapter_key == "csv" else "application/json"
-        }:
+        allowed_types = {adapter_key.casefold()}
+        allowed_types |= {
+            "csv": {"text/csv"}, "json": {"application/json"},
+        }.get(adapter_key.casefold(), set())
+        if content_type and content_type.casefold() not in allowed_types:
             raise SupplierAdapterError("content_type does not match supplier adapter")
+        feed_mode = str(config.get("feed_mode", "full")).casefold()
+        if feed_mode not in ("full", "delta"):
+            raise SupplierAdapterError("feed_mode must be 'full' or 'delta'")
         records = adapter.parse(payload, config)
         imported, matched, errors = 0, 0, []
         for index, record in enumerate(records, start=1):
@@ -268,7 +283,9 @@ class SupplierHubService:
                     currency=record.currency,
                     stock_quantity=record.stock_quantity,
                     stock_status=record.stock_status,
-                    active=record.active,
+                    # A record present in the feed is offered again unless the
+                    # supplier explicitly marks it inactive.
+                    active=True if record.active is None else record.active,
                 )
                 imported += 1
                 if (record.normalized_data.get("gtin")
@@ -280,11 +297,60 @@ class SupplierHubService:
                         matched += 1
             except (ProductMasterError, SupplierAdapterError) as exc:
                 errors.append({"record": index, "supplier_sku": record.supplier_sku, "error": str(exc)})
+        delisting = self._deactivate_missing_offers(
+            supplier_id, {r.supplier_sku for r in records}, feed_mode,
+            errors=len(errors), max_pct=config.get("max_delist_pct", 50),
+        )
         return {
             "supplier_id": supplier_id,
             "adapter": adapter_key,
+            "feed_mode": feed_mode,
             "records_seen": len(records),
             "offers_imported": imported,
             "gtin_matches": matched,
+            "offers_deactivated": delisting["deactivated"],
+            "delisting_skipped": delisting["skipped"],
             "errors": errors,
         }
+
+    def _deactivate_missing_offers(
+        self, supplier_id: str, seen_skus: set, feed_mode: str, *,
+        errors: int, max_pct: Any,
+    ) -> Dict[str, Any]:
+        """In a full feed, offers absent from the payload are no longer offered.
+
+        Guard rails: never delist on a delta feed, an empty feed, a feed with
+        row errors, or when more than ``max_delist_pct`` of active offers would
+        disappear at once (typically a truncated or broken feed).
+        """
+        if feed_mode != "full":
+            return {"deactivated": 0, "skipped": None}
+        if not seen_skus:
+            return {"deactivated": 0, "skipped": "empty feed"}
+        if errors:
+            return {"deactivated": 0, "skipped": "feed contained row errors"}
+        try:
+            limit = Decimal(str(max_pct))
+        except InvalidOperation as exc:
+            raise SupplierAdapterError("max_delist_pct must be a number") from exc
+        with self.persistence.session() as session:
+            active = session.scalars(select(SupplierOffer).where(
+                SupplierOffer.supplier_id == supplier_id,
+                SupplierOffer.active.is_(True),
+            )).all()
+            missing = [o for o in active if o.supplier_sku not in seen_skus]
+            if not missing:
+                return {"deactivated": 0, "skipped": None}
+            share = Decimal(len(missing)) * 100 / Decimal(len(active))
+            if share > limit:
+                return {
+                    "deactivated": 0,
+                    "skipped": f"{len(missing)} of {len(active)} offers missing "
+                               f"exceeds max_delist_pct={limit}",
+                }
+            now = datetime.now(timezone.utc)
+            for offer in missing:
+                offer.active = False
+                offer.stock_status = "delisted"
+                offer.updated_at = now
+            return {"deactivated": len(missing), "skipped": None}

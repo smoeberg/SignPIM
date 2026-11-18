@@ -151,6 +151,9 @@ class ProductMaster(Base):
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     master_sku = Column(String(128), nullable=False)
     gtin = Column(String(14), nullable=True)
+    # GTIN zero-padded to 14 digits: UPC-12, EAN-13 and GTIN-14 of the same
+    # item share one value. Identity checks and matching use this column.
+    gtin14 = Column(String(14), nullable=True)
     brand = Column(String(255), nullable=True)
     manufacturer = Column(String(255), nullable=True)
     mpn = Column(String(128), nullable=True)
@@ -169,8 +172,7 @@ class ProductMaster(Base):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "master_sku", name="uq_product_master_tenant_sku"),
-        UniqueConstraint("tenant_id", "gtin", name="uq_product_master_tenant_gtin"),
-        Index("idx_product_master_tenant_gtin", "tenant_id", "gtin"),
+        UniqueConstraint("tenant_id", "gtin14", name="uq_product_master_tenant_gtin14"),
         Index("idx_product_master_tenant_brand_mpn", "tenant_id", "brand", "mpn"),
     )
 

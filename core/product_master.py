@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from core.models import (
     ProductMaster,
@@ -48,6 +48,16 @@ def _valid_gtin(value: Optional[str]) -> bool:
         for index, digit in enumerate(body)
     )
     return (10 - total % 10) % 10 == check
+
+
+def normalize_gtin(value: Any) -> Optional[str]:
+    """Return a valid GTIN as 14 digits (zero-padded), or None if invalid."""
+    if value is None:
+        return None
+    digits = str(value).strip()
+    if not _valid_gtin(digits):
+        return None
+    return digits.zfill(14)
 
 
 def _as_dict(row: Any, fields: List[str]) -> Dict[str, Any]:
@@ -136,7 +146,18 @@ class ProductMasterService:
                 session.add(product)
             product.name = name.strip()
             if gtin is not None:
+                gtin14 = normalize_gtin(normalized_gtin)
+                if gtin14 is not None:
+                    owner = session.scalar(select(ProductMaster).where(
+                        ProductMaster.tenant_id == tenant_id,
+                        ProductMaster.gtin14 == gtin14,
+                    ))
+                    if owner is not None and owner is not product:
+                        raise ProductMasterError(
+                            f"gtin is already used by master product {owner.master_sku}"
+                        )
                 product.gtin = normalized_gtin
+                product.gtin14 = gtin14
             if brand is not None:
                 product.brand = brand
             if manufacturer is not None:
@@ -204,6 +225,10 @@ class ProductMasterService:
                 SupplierOffer.supplier_sku == supplier_sku.strip(),
             ))
             now = datetime.now(timezone.utc)
+            previous_state = None if offer is None else (
+                offer.raw_data, offer.cost_price, offer.currency,
+                offer.stock_quantity, offer.stock_status,
+            )
             if offer is None:
                 offer = SupplierOffer(
                     tenant_id=supplier.tenant_id,
@@ -237,16 +262,23 @@ class ProductMasterService:
             offer.last_seen_at = now
             session.flush()
 
-            session.add(SupplierOfferSnapshot(
-                tenant_id=supplier.tenant_id,
-                offer_id=offer.id,
-                cost_price=offer.cost_price,
-                currency=offer.currency,
-                stock_quantity=offer.stock_quantity,
-                stock_status=offer.stock_status,
-                raw_data=deepcopy(raw_copy),
-            ))
-            session.flush()
+            current_state = (
+                offer.raw_data, offer.cost_price, offer.currency,
+                offer.stock_quantity, offer.stock_status,
+            )
+            # Snapshots record observed changes; an identical re-observation
+            # only advances last_seen_at.
+            if previous_state != current_state:
+                session.add(SupplierOfferSnapshot(
+                    tenant_id=supplier.tenant_id,
+                    offer_id=offer.id,
+                    cost_price=offer.cost_price,
+                    currency=offer.currency,
+                    stock_quantity=offer.stock_quantity,
+                    stock_status=offer.stock_status,
+                    raw_data=deepcopy(raw_copy),
+                ))
+                session.flush()
             return _as_dict(offer, [
                 "id", "tenant_id", "supplier_id", "product_id", "supplier_sku",
                 "supplier_product_id", "supplier_url", "title", "description",
@@ -271,13 +303,16 @@ class ProductMasterService:
                 or (offer.raw_data or {}).get("ean")
             )
             normalized_gtin = str(source_gtin).strip() if source_gtin else ""
-            if gtin is not None and str(gtin).strip() != normalized_gtin:
+            if gtin is not None and (
+                normalize_gtin(gtin) or str(gtin).strip()
+            ) != (normalize_gtin(normalized_gtin) or normalized_gtin):
                 raise ProductMasterError("provided GTIN does not match supplier source data")
-            if not _valid_gtin(normalized_gtin):
+            gtin14 = normalize_gtin(normalized_gtin)
+            if gtin14 is None:
                 return None
             product = session.scalar(select(ProductMaster).where(
                 ProductMaster.tenant_id == offer.tenant_id,
-                ProductMaster.gtin == normalized_gtin,
+                ProductMaster.gtin14 == gtin14,
             ))
             if product is None:
                 return None
@@ -339,13 +374,31 @@ class ProductMasterService:
             mpn = str(source_mpn or "").strip()
             if not brand or not mpn:
                 return []
+            # Exact, case-insensitive comparison. Supplier values are data,
+            # never LIKE patterns (``%`` and ``_`` must not act as wildcards).
             candidates = session.scalars(select(ProductMaster).where(
                 ProductMaster.tenant_id == offer.tenant_id,
-                ProductMaster.brand.ilike(brand),
-                ProductMaster.mpn.ilike(mpn),
+                func.lower(ProductMaster.brand) == brand.casefold(),
+                func.lower(ProductMaster.mpn) == mpn.casefold(),
             )).all()
             proposals = []
+            match_fields = [
+                "id", "tenant_id", "offer_id", "product_id",
+                "method", "confidence", "status", "evidence",
+            ]
             for product in candidates:
+                existing = session.scalars(select(ProductMatch).where(
+                    ProductMatch.offer_id == offer.id,
+                    ProductMatch.product_id == product.id,
+                    ProductMatch.method == "brand_mpn_exact",
+                )).all()
+                if any(m.status in ("rejected", "confirmed") for m in existing):
+                    # A reviewer already decided; never re-propose.
+                    continue
+                open_proposal = next((m for m in existing if m.status == "proposed"), None)
+                if open_proposal is not None:
+                    proposals.append(_as_dict(open_proposal, match_fields))
+                    continue
                 match = ProductMatch(
                     tenant_id=offer.tenant_id,
                     offer_id=offer.id,

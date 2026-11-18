@@ -1,8 +1,6 @@
 name: FullSyncWorkflow
 entity: Product
 steps:
-  - action: transform
-    rules: [{ field: price, op: multiply, value: 1.25 }]
   - action: validate
     rules: [missing_images, missing_sku, invalid_price, valid_ean_13]
   - action: calculate
