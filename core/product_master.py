@@ -274,22 +274,35 @@ class ProductMasterService:
             ])
 
     def suggest_brand_mpn_matches(
-        self, offer_id: str, brand: str, mpn: str, *,
+        self, offer_id: str, brand: Optional[str] = None, mpn: Optional[str] = None, *,
         expected_tenant_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
-        """Return proposals only; brand+MPN similarity never auto-links products."""
-        if not brand or not mpn:
-            return []
+        """Propose matches using supplier source identity; never auto-link products."""
         with self.persistence.session() as session:
             offer = session.get(SupplierOffer, offer_id)
             if offer is None:
                 raise ProductMasterError("supplier offer not found")
             if expected_tenant_id and offer.tenant_id != expected_tenant_id:
                 raise ProductMasterError("supplier offer does not belong to tenant")
+            normalized = offer.normalized_data or {}
+            source = offer.raw_data or {}
+            source_brand = normalized.get("brand") or source.get("brand")
+            source_mpn = (
+                normalized.get("mpn") or source.get("mpn")
+                or source.get("manufacturer_part_number")
+            )
+            if brand and str(brand).strip().casefold() != str(source_brand or "").strip().casefold():
+                raise ProductMasterError("provided brand does not match supplier source data")
+            if mpn and str(mpn).strip().casefold() != str(source_mpn or "").strip().casefold():
+                raise ProductMasterError("provided MPN does not match supplier source data")
+            brand = str(source_brand or "").strip()
+            mpn = str(source_mpn or "").strip()
+            if not brand or not mpn:
+                return []
             candidates = session.scalars(select(ProductMaster).where(
                 ProductMaster.tenant_id == offer.tenant_id,
-                ProductMaster.brand.ilike(brand.strip()),
-                ProductMaster.mpn.ilike(mpn.strip()),
+                ProductMaster.brand.ilike(brand),
+                ProductMaster.mpn.ilike(mpn),
             )).all()
             proposals = []
             for product in candidates:
