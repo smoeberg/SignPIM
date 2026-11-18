@@ -158,6 +158,7 @@ class ProductMaster(Base):
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "master_sku", name="uq_product_master_tenant_sku"),
+        UniqueConstraint("tenant_id", "gtin", name="uq_product_master_tenant_gtin"),
         Index("idx_product_master_tenant_gtin", "tenant_id", "gtin"),
         Index("idx_product_master_tenant_brand_mpn", "tenant_id", "brand", "mpn"),
     )
