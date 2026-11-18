@@ -23,7 +23,7 @@ ROLE_SCOPES: Dict[str, List[str]] = {
     "writer": ["products:read", "products:write", "quality:read", "ingest:write"],
     "admin": ["products:read", "products:write", "quality:read", "ingest:write",
               "rules:write", "mappings:write", "keys:manage",
-              "pricing:write", "pricing:approve"],
+              "pricing:write", "pricing:approve", "channels:manage"],
 }
 
 

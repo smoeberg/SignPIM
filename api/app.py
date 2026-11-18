@@ -15,7 +15,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request, Body
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Query, Request, Body, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, WithJsonSchema
@@ -30,6 +30,8 @@ Dec = Annotated[Decimal, WithJsonSchema({
 from core.persistence import PersistenceService
 from core.product_master import ProductMasterService, ProductMasterError
 from core.pricing import PricingService, PricingError
+from core.outbox import enqueue as enqueue_sync
+from services.channels.sync import ChannelSyncError, ChannelSyncService, EventRejected
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 from services.images import ImageService, ImageError
@@ -245,6 +247,30 @@ class ExchangeRateIn(BaseModel):
     rate: Dec = Field(gt=0, description="Units of currency per 1 EUR")
     valid_on: Optional[date] = None
     source: str = "manual"
+
+
+class ChannelConnectionIn(BaseModel):
+    base_url: str = Field(description="Shop root URL, e.g. https://shop-a.dk")
+    credential_ref: str = Field(description="Where the Webservice key lives, e.g. env:SIGNPIM_PS_SHOP_A_KEY")
+    webhook_secret_ref: Optional[str] = Field(
+        default=None, description="Shared secret for signed events from the module, e.g. env:SIGNPIM_PS_SHOP_A_HOOK")
+    api_mode: str = "webservice"
+    connector_config: Dict[str, Any] = Field(
+        default_factory=dict,
+        description=('{"languages": {"da": 1, "en": 2}, "id_tax_rules_group": 1, '
+                     '"category_map": {"tools": 12}, "default_category_id": 2, '
+                     '"currency_ids": {"DKK": 2}, "manufacturer_map": {"Bosch": 3}, '
+                     '"unknown_stock_quantity": 10}'),
+    )
+
+
+class ChannelSyncIn(BaseModel):
+    product_id: Optional[str] = Field(default=None, description="Omit to queue every product with an offer or a shop link")
+    force: bool = Field(default=False, description="Resend everything, ignoring change detection")
+
+
+class MediaOrderIn(BaseModel):
+    media_ids: List[str]
 
 
 class PriceCalculateIn(BaseModel):
@@ -843,6 +869,168 @@ def lowest_published_price(channel_id: str, product_id: str, days: int = Query(3
     if result is None:
         raise HTTPException(status_code=404, detail="No published prices")
     return result
+
+
+# ---------- channel connector (ADR-018) ----------
+def _sync_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except ChannelSyncError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+def get_channel_sync() -> ChannelSyncService:
+    return ChannelSyncService(persistence, media_root=media_root)
+
+
+@app.put("/catalog/channels/{channel_id}/connection", tags=["channels"])
+def connect_channel(channel_id: str, body: ChannelConnectionIn, tenant: str = "default",
+                    sync: ChannelSyncService = Depends(get_channel_sync),
+                    info: dict = Depends(require_scope("channels:manage"))):
+    """Connect a channel to a PrestaShop shop. Secrets are referenced, never stored."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _sync_call(sync.connect, t.id, channel_id, **body.model_dump())
+
+
+@app.post("/catalog/channels/{channel_id}/connection/test", tags=["channels"])
+def test_channel_connection(channel_id: str, tenant: str = "default",
+                            sync: ChannelSyncService = Depends(get_channel_sync),
+                            info: dict = Depends(require_scope("channels:manage"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _sync_call(sync.test_connection, t.id, channel_id)
+
+
+@app.post("/catalog/channels/{channel_id}/import-catalog", tags=["channels"])
+def import_channel_catalog(channel_id: str, tenant: str = "default",
+                           sync: ChannelSyncService = Depends(get_channel_sync),
+                           info: dict = Depends(require_scope("channels:manage"))):
+    """Link products already in the shop to master products (reference, then GTIN)."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return _sync_call(sync.import_catalog, t.id, channel_id)
+    except Exception as exc:  # channel/network errors
+        if isinstance(exc, HTTPException):
+            raise
+        raise HTTPException(status_code=502, detail=f"shop request failed: {exc}")
+
+
+@app.post("/catalog/channels/{channel_id}/sync", tags=["channels"])
+def sync_channel(channel_id: str, body: ChannelSyncIn, background: BackgroundTasks,
+                 tenant: str = "default",
+                 sync: ChannelSyncService = Depends(get_channel_sync),
+                 info: dict = Depends(require_scope("products:write"))):
+    """Queue products for synchronisation and start processing immediately."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    from core.models import Channel, ExternalRef, SupplierOffer
+    from sqlalchemy import select as _select
+    with persistence.session() as session:
+        channel = session.get(Channel, channel_id)
+        if channel is None or channel.tenant_id != t.id:
+            raise HTTPException(status_code=404, detail="channel not found")
+        if not channel.base_url:
+            raise HTTPException(status_code=400, detail="channel is not connected")
+        if body.product_id:
+            product_ids = [body.product_id]
+        else:
+            product_ids = set(session.scalars(_select(SupplierOffer.product_id).where(
+                SupplierOffer.tenant_id == t.id, SupplierOffer.product_id.is_not(None))).all())
+            product_ids |= set(session.scalars(_select(ExternalRef.local_id).where(
+                ExternalRef.channel_id == channel_id, ExternalRef.entity_type == "product")).all())
+    jobs = enqueue_sync(persistence, t.id, product_ids, reason="manual", channel_id=channel_id,
+                        force=body.force)
+    background.add_task(sync.process_due, tenant_id=t.id, channel_id=channel_id, limit=len(jobs) or 1)
+    return {"queued": len(jobs)}
+
+
+@app.get("/catalog/channels/{channel_id}/sync-jobs", tags=["channels"])
+def list_sync_jobs(channel_id: str, status: Optional[str] = Query(None, pattern="^(pending|done|dead)$"),
+                   limit: int = Query(100, gt=0, le=500), tenant: str = "default",
+                   info: dict = Depends(require_scope("products:read"))):
+    """Recent jobs; status=dead lists what needs attention."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    from core.models import SyncJob
+    from sqlalchemy import select as _select
+    with persistence.session() as session:
+        query = _select(SyncJob).where(SyncJob.tenant_id == t.id, SyncJob.channel_id == channel_id)
+        if status:
+            query = query.where(SyncJob.status == status)
+        rows = session.scalars(query.order_by(SyncJob.updated_at.desc()).limit(limit)).all()
+        return [{
+            "id": j.id, "product_id": j.product_id, "reason": j.reason, "status": j.status,
+            "attempts": j.attempts, "last_error": j.last_error, "result": j.result,
+            "updated_at": j.updated_at.isoformat() if j.updated_at else None,
+        } for j in rows]
+
+
+@app.post("/channels/{channel_id}/events", tags=["channels"])
+async def channel_event(channel_id: str, request: Request, background: BackgroundTasks):
+    """Realtime events from the SignPIM PrestaShop module.
+
+    Authenticated by HMAC-SHA256 over "<timestamp>.<body>" with the channel's
+    webhook secret (headers X-SignPIM-Timestamp, X-SignPIM-Signature).
+    """
+    body = await request.body()
+    sync = get_channel_sync()
+    try:
+        outcome = sync.handle_event(
+            channel_id, body,
+            request.headers.get("X-SignPIM-Timestamp", ""),
+            request.headers.get("X-SignPIM-Signature", ""),
+        )
+    except EventRejected as exc:
+        raise HTTPException(status_code=401, detail=str(exc))
+    except ChannelSyncError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if not outcome.get("duplicate"):
+        background.add_task(sync.process_due, limit=200)
+    return outcome
+
+
+@app.post("/catalog/products/{product_id}/media", tags=["catalog"])
+async def upload_product_media(product_id: str, file: UploadFile = File(...),
+                               alt_text: Optional[str] = Form(None), tenant: str = "default",
+                               sync: ChannelSyncService = Depends(get_channel_sync),
+                               info: dict = Depends(require_scope("products:write"))):
+    """Add an image to a master product. Images are owned by SignPIM and pushed to every shop."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    data = await file.read(20 * 1024 * 1024 + 1)
+    return _sync_call(sync.add_media, t.id, product_id, data, alt_text=alt_text)
+
+
+@app.get("/catalog/products/{product_id}/media", tags=["catalog"])
+def list_product_media(product_id: str, tenant: str = "default",
+                       sync: ChannelSyncService = Depends(get_channel_sync),
+                       info: dict = Depends(require_scope("products:read"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return sync.list_media(t.id, product_id)
+
+
+@app.put("/catalog/products/{product_id}/media/order", tags=["catalog"])
+def reorder_product_media(product_id: str, body: MediaOrderIn, tenant: str = "default",
+                          sync: ChannelSyncService = Depends(get_channel_sync),
+                          info: dict = Depends(require_scope("products:write"))):
+    """Set image order; the first image is the cover."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _sync_call(sync.reorder_media, t.id, product_id, body.media_ids)
+
+
+@app.delete("/catalog/products/{product_id}/media/{media_id}", tags=["catalog"])
+def delete_product_media(product_id: str, media_id: str, tenant: str = "default",
+                         sync: ChannelSyncService = Depends(get_channel_sync),
+                         info: dict = Depends(require_scope("products:write"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    _sync_call(sync.delete_media, t.id, product_id, media_id)
+    return {"deleted": media_id}
 
 
 # ---------- products ----------

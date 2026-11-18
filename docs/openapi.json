@@ -1927,6 +1927,579 @@
         }
       }
     },
+    "/catalog/channels/{channel_id}/connection": {
+      "put": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Connect Channel",
+        "description": "Connect a channel to a PrestaShop shop. Secrets are referenced, never stored.",
+        "operationId": "connect_channel_catalog_channels__channel_id__connection_put",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Channel Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelConnectionIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/channels/{channel_id}/connection/test": {
+      "post": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Test Channel Connection",
+        "operationId": "test_channel_connection_catalog_channels__channel_id__connection_test_post",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Channel Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/channels/{channel_id}/import-catalog": {
+      "post": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Import Channel Catalog",
+        "description": "Link products already in the shop to master products (reference, then GTIN).",
+        "operationId": "import_channel_catalog_catalog_channels__channel_id__import_catalog_post",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Channel Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/channels/{channel_id}/sync": {
+      "post": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Sync Channel",
+        "description": "Queue products for synchronisation and start processing immediately.",
+        "operationId": "sync_channel_catalog_channels__channel_id__sync_post",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Channel Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelSyncIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/channels/{channel_id}/sync-jobs": {
+      "get": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "List Sync Jobs",
+        "description": "Recent jobs; status=dead lists what needs attention.",
+        "operationId": "list_sync_jobs_catalog_channels__channel_id__sync_jobs_get",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Channel Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(pending|done|dead)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "exclusiveMinimum": 0,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/channels/{channel_id}/events": {
+      "post": {
+        "tags": [
+          "channels"
+        ],
+        "summary": "Channel Event",
+        "description": "Realtime events from the SignPIM PrestaShop module.\n\nAuthenticated by HMAC-SHA256 over \"<timestamp>.<body>\" with the channel's\nwebhook secret (headers X-SignPIM-Timestamp, X-SignPIM-Signature).",
+        "operationId": "channel_event_channels__channel_id__events_post",
+        "parameters": [
+          {
+            "name": "channel_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Channel Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/products/{product_id}/media": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Upload Product Media",
+        "description": "Add an image to a master product. Images are owned by SignPIM and pushed to every shop.",
+        "operationId": "upload_product_media_catalog_products__product_id__media_post",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_product_media_catalog_products__product_id__media_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "List Product Media",
+        "operationId": "list_product_media_catalog_products__product_id__media_get",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/products/{product_id}/media/order": {
+      "put": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Reorder Product Media",
+        "description": "Set image order; the first image is the cover.",
+        "operationId": "reorder_product_media_catalog_products__product_id__media_order_put",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MediaOrderIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/products/{product_id}/media/{media_id}": {
+      "delete": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Delete Product Media",
+        "operationId": "delete_product_media_catalog_products__product_id__media__media_id__delete",
+        "parameters": [
+          {
+            "name": "product_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Product Id"
+            }
+          },
+          {
+            "name": "media_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Media Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/products": {
       "post": {
         "tags": [
@@ -2887,6 +3460,74 @@
   },
   "components": {
     "schemas": {
+      "Body_upload_product_media_catalog_products__product_id__media_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          },
+          "alt_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt Text"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_upload_product_media_catalog_products__product_id__media_post"
+      },
+      "ChannelConnectionIn": {
+        "properties": {
+          "base_url": {
+            "type": "string",
+            "title": "Base Url",
+            "description": "Shop root URL, e.g. https://shop-a.dk"
+          },
+          "credential_ref": {
+            "type": "string",
+            "title": "Credential Ref",
+            "description": "Where the Webservice key lives, e.g. env:SIGNPIM_PS_SHOP_A_KEY"
+          },
+          "webhook_secret_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Webhook Secret Ref",
+            "description": "Shared secret for signed events from the module, e.g. env:SIGNPIM_PS_SHOP_A_HOOK"
+          },
+          "api_mode": {
+            "type": "string",
+            "title": "Api Mode",
+            "default": "webservice"
+          },
+          "connector_config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Connector Config",
+            "description": "{\"languages\": {\"da\": 1, \"en\": 2}, \"id_tax_rules_group\": 1, \"category_map\": {\"tools\": 12}, \"default_category_id\": 2, \"currency_ids\": {\"DKK\": 2}, \"manufacturer_map\": {\"Bosch\": 3}, \"unknown_stock_quantity\": 10}"
+          }
+        },
+        "type": "object",
+        "required": [
+          "base_url",
+          "credential_ref"
+        ],
+        "title": "ChannelConnectionIn"
+      },
       "ChannelIn": {
         "properties": {
           "code": {
@@ -2980,6 +3621,30 @@
         ],
         "title": "ChannelIn"
       },
+      "ChannelSyncIn": {
+        "properties": {
+          "product_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Product Id",
+            "description": "Omit to queue every product with an offer or a shop link"
+          },
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "Resend everything, ignoring change detection",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "ChannelSyncIn"
+      },
       "ExchangeRateIn": {
         "properties": {
           "currency": {
@@ -3061,6 +3726,22 @@
           "field"
         ],
         "title": "MappingIn"
+      },
+      "MediaOrderIn": {
+        "properties": {
+          "media_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Media Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "media_ids"
+        ],
+        "title": "MediaOrderIn"
       },
       "PriceCalculateIn": {
         "properties": {

@@ -24,6 +24,12 @@ services:
     environment:
       - POSTGRES_DSN=postgresql+psycopg2://${POSTGRES_USER:-signpim}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signpim}
       - SIGNPIM_META_DIR=/app/meta
+      - SIGNPIM_MEDIA_ROOT=/app/media
+    env_file:
+      - path: .env.channels
+        required: false
+    volumes:
+      - media:/app/media
     ports:
       - "${API_PORT:-8000}:8000"
     depends_on:
@@ -41,6 +47,26 @@ services:
           cpus: '2.0'
           memory: 512M
 
+  # Pushes product data, prices, stock and images to the shops (ADR-018).
+  sync-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    command: ["python", "scripts/channel_sync_worker.py", "--interval", "5"]
+    environment:
+      - POSTGRES_DSN=postgresql+psycopg2://${POSTGRES_USER:-signpim}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-signpim}
+      - SIGNPIM_MEDIA_ROOT=/app/media
+    # Shop API keys and webhook secrets referenced as env:NAME by channels.
+    env_file:
+      - path: .env.channels
+        required: false
+    volumes:
+      - media:/app/media
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   # Reverse proxy for TLS termination (optional; enable via --profile edge)
   nginx:
     image: nginx:alpine
@@ -56,3 +82,4 @@ services:
 
 volumes:
   pgdata:
+  media:

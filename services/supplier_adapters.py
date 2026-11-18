@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 from sqlalchemy import select
 
 from core.models import Supplier, SupplierOffer
+from core.outbox import enqueue_in_session
 from core.product_master import ProductMasterError, ProductMasterService
 
 
@@ -368,4 +369,9 @@ class SupplierHubService:
                 offer.active = False
                 offer.stock_status = "delisted"
                 offer.updated_at = now
+            session.flush()
+            enqueue_in_session(
+                session, missing[0].tenant_id,
+                [o.product_id for o in missing if o.product_id], reason="delisted",
+            )
             return {"deactivated": len(missing), "skipped": None}

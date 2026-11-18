@@ -20,6 +20,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sqlalchemy import or_, select
 
+from core.outbox import enqueue_in_session
 from core.models import (
     Channel,
     ExchangeRate,
@@ -665,6 +666,8 @@ class PricingService:
             calc.reviewed_at = datetime.now(timezone.utc)
             session.flush()
             self._supersede_pending(session, calc)
+            enqueue_in_session(session, tenant_id, [calc.product_id], reason="price_approved",
+                               channel_id=calc.channel_id)
             return _row(calc, CALC_FIELDS)
 
     def reject(self, tenant_id: str, calc_id: str, reviewer: str) -> Dict[str, Any]:

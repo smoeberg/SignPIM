@@ -291,6 +291,13 @@ class Channel(Base):
     approval_threshold_pct = Column(Numeric(7, 4), nullable=False, default=10)
     preferred_supplier_id = Column(String(36), ForeignKey("suppliers.id"), nullable=True)
     status = Column(String(24), nullable=False, default="active")
+    # Connection (ADR-018). Secrets are never stored: *_ref names where they
+    # live (e.g. "env:SIGNPIM_PS_SHOP_A_KEY").
+    base_url = Column(String(512), nullable=True)
+    api_mode = Column(String(24), nullable=False, default="webservice")
+    credential_ref = Column(String(255), nullable=True)
+    webhook_secret_ref = Column(String(255), nullable=True)
+    connector_config = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     __table_args__ = (
@@ -397,4 +404,107 @@ class PublishedPrice(Base):
 
     __table_args__ = (
         Index("idx_published_prices_lookup", "product_id", "channel_id", "published_at"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Channel connector (ADR-018): SignPIM owns product data, media, price, stock.
+# ---------------------------------------------------------------------------
+
+class ProductMedia(Base):
+    """An image owned by SignPIM for a ProductMaster. Position 0 is the cover."""
+    __tablename__ = "product_media"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=False)
+    storage_path = Column(String(512), nullable=False)   # relative to media root
+    sha256 = Column(String(64), nullable=False)
+    mime = Column(String(64), nullable=False)
+    position = Column(Integer, nullable=False, default=0)
+    alt_text = Column(String(512), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("product_id", "sha256", name="uq_product_media_product_sha"),
+        Index("idx_product_media_product", "product_id", "position"),
+    )
+
+
+class ExternalRef(Base):
+    """Maps a SignPIM object to its id in a channel, with the last pushed hash."""
+    __tablename__ = "external_refs"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    entity_type = Column(String(32), nullable=False)   # product|image|stock|specific_price
+    local_id = Column(String(96), nullable=False)
+    external_id = Column(String(64), nullable=False)
+    content_hash = Column(String(64), nullable=True)
+    synced_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("channel_id", "entity_type", "local_id", name="uq_external_ref_local"),
+        Index("idx_external_ref_external", "channel_id", "entity_type", "external_id"),
+    )
+
+
+class SyncJob(Base):
+    """Outbox entry: bring one product up to date in one channel."""
+    __tablename__ = "sync_jobs"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String(64), nullable=False, default="change")
+    force = Column(Boolean, nullable=False, default=False)  # ignore hashes (shop drift)
+    status = Column(String(16), nullable=False, default="pending")  # pending|done|dead
+    attempts = Column(Integer, nullable=False, default=0)
+    next_attempt_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    last_error = Column(Text, nullable=True)
+    result = Column(JSON, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    __table_args__ = (
+        Index("idx_sync_jobs_due", "channel_id", "status", "next_attempt_at"),
+    )
+
+
+class StockReservation(Base):
+    """Units sold in a channel that the supplier feed has not reflected yet."""
+    __tablename__ = "stock_reservations"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=False)
+    external_order_id = Column(String(64), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("channel_id", "external_order_id", "product_id",
+                         name="uq_stock_reservation_order_line"),
+        Index("idx_stock_reservation_product", "product_id", "created_at"),
+    )
+
+
+class InboundEvent(Base):
+    """Signed event received from a channel module (dedup by event_id)."""
+    __tablename__ = "inbound_events"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id", ondelete="CASCADE"), nullable=False)
+    event_id = Column(String(96), nullable=False)
+    event_type = Column(String(64), nullable=False)
+    payload = Column(JSON, nullable=False, default=dict)
+    outcome = Column(JSON, nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("channel_id", "event_id", name="uq_inbound_event_channel_event"),
     )

@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import func, select
 
+from core.outbox import enqueue_in_session
+
 from core.models import (
     ProductMaster,
     ProductMatch,
@@ -185,6 +187,7 @@ class ProductMasterService:
             if not is_new:
                 product.version += 1
             session.flush()
+            enqueue_in_session(session, tenant_id, [product.id], reason="product")
             return _as_dict(product, [
                 "id", "tenant_id", "master_sku", "gtin", "brand",
                 "manufacturer", "mpn", "name", "category", "description", "attributes",
@@ -304,6 +307,8 @@ class ProductMasterService:
                     raw_data=deepcopy(raw_copy),
                 ))
                 session.flush()
+            if offer.product_id and previous_state != current_state:
+                enqueue_in_session(session, supplier.tenant_id, [offer.product_id], reason="offer")
             return _as_dict(offer, [
                 "id", "tenant_id", "supplier_id", "product_id", "supplier_sku",
                 "supplier_product_id", "supplier_url", "title", "description",
@@ -358,6 +363,7 @@ class ProductMasterService:
                     "method", "confidence", "status", "evidence",
                 ])
             offer.product_id = product.id
+            enqueue_in_session(session, offer.tenant_id, [product.id], reason="match")
             match = ProductMatch(
                 tenant_id=offer.tenant_id,
                 offer_id=offer.id,
@@ -460,6 +466,7 @@ class ProductMasterService:
             match.reviewed_at = datetime.now(timezone.utc)
             offer.product_id = match.product_id
             session.flush()
+            enqueue_in_session(session, offer.tenant_id, [match.product_id], reason="match")
             return _as_dict(match, [
                 "id", "tenant_id", "offer_id", "product_id", "method",
                 "confidence", "status", "evidence", "reviewed_by", "reviewed_at",

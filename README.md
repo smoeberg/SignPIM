@@ -147,3 +147,15 @@ supplier cost -> EUR (+FX buffer) -> landed cost -> rule (markup | margin | fixe
 - `PublishedPrice` keeps what was live per channel; `/lowest?days=30` answers the Omnibus "før"-pris question.
 
 See `docs/adr/ADR-017_Central_Pricing_Engine.md` for the full design.
+
+## PrestaShop channel connector (ADR-018)
+
+SignPIM owns product data, images, price and stock and keeps every connected PrestaShop shop up to date in near realtime.
+
+- `PUT /catalog/channels/{id}/connection` connects a shop (Webservice key referenced as `env:NAME`, never stored).
+- `POST /catalog/channels/{id}/import-catalog` links products already in the shop (reference, then GTIN).
+- Changes are queued per product and shop and pushed by `scripts/channel_sync_worker.py` (`sync-worker` service); only changed parts are sent.
+- `POST /catalog/products/{id}/media` uploads images; their order (first = cover) is mirrored in every shop.
+- The PrestaShop module in `integrations/prestashop/signpimconnector` sends signed order events, so a sale in one shop lowers stock in all shops, and restores SignPIM's data if someone edits it in the back office.
+
+See `docs/adr/ADR-018_PrestaShop_Channel_Connector.md`, including the checklist to verify on a staging shop before go-live.
