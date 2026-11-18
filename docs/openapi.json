@@ -1137,6 +1137,176 @@
         }
       }
     },
+    "/catalog/offers/{offer_id}/match-brand-mpn": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Propose Catalog Match By Brand Mpn",
+        "operationId": "propose_catalog_match_by_brand_mpn_catalog_offers__offer_id__match_brand_mpn_post",
+        "parameters": [
+          {
+            "name": "offer_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Offer Id"
+            }
+          },
+          {
+            "name": "brand",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Brand"
+            }
+          },
+          {
+            "name": "mpn",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "title": "Mpn"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/matches/{match_id}/confirm": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Confirm Catalog Match",
+        "operationId": "confirm_catalog_match_catalog_matches__match_id__confirm_post",
+        "parameters": [
+          {
+            "name": "match_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Match Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/catalog/matches/{match_id}/reject": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Reject Catalog Match",
+        "operationId": "reject_catalog_match_catalog_matches__match_id__reject_post",
+        "parameters": [
+          {
+            "name": "match_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Match Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/products": {
       "post": {
         "tags": [
