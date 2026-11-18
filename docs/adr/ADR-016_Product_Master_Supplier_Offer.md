@@ -27,8 +27,8 @@ SupplierOffer.raw_data is the supplier payload, copied as received and never nor
 
 ## Matching policy
 
-- A valid, exact GTIN match within the same tenant may link an offer automatically.
-- Brand + MPN matches are proposals only. They never merge or link products automatically.
+- A valid, exact GTIN read from the supplier offer's own raw or normalized source data may link an offer automatically; callers cannot supply a different GTIN to force a match.
+- Brand + MPN values are read from the supplier offer source. Matches are proposals only; they never merge or link products until a reviewer explicitly confirms them.
 - Ambiguous or missing identity remains unmatched until reviewed.
 - Supplier SKU is never treated as a global product identifier.
 
