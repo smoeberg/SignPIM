@@ -25,11 +25,11 @@ def test_one_canonical_product_can_have_offers_from_multiple_suppliers(catalog):
     )
 
     offer_a = service.upsert_supplier_offer(
-        supplier_a["id"], "SUP-001", {"supplier_sku": "SUP-001", "name": "Drill A"},
+        supplier_a["id"], "SUP-001", {"supplier_sku": "SUP-001", "name": "Drill A", "brand": "Example", "mpn": "X-100"},
         cost_price="100.00", currency="dkk", stock_quantity=5,
     )
     offer_b = service.upsert_supplier_offer(
-        supplier_b["id"], "SUP-001", {"supplier_sku": "SUP-001", "name": "Drill B"},
+        supplier_b["id"], "SUP-001", {"supplier_sku": "SUP-001", "name": "Drill B", "brand": "Example", "mpn": "X-100"},
         cost_price="95.50", currency="EUR", stock_quantity=8,
     )
 
