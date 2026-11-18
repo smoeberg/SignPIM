@@ -26,15 +26,23 @@ def test_one_canonical_product_can_have_offers_from_multiple_suppliers(catalog):
 
     offer_a = service.upsert_supplier_offer(
         supplier_a["id"], "SUP-001", {"supplier_sku": "SUP-001", "name": "Drill A"},
-        product_id=product["id"], cost_price="100.00", currency="dkk", stock_quantity=5,
+        cost_price="100.00", currency="dkk", stock_quantity=5,
     )
     offer_b = service.upsert_supplier_offer(
         supplier_b["id"], "SUP-001", {"supplier_sku": "SUP-001", "name": "Drill B"},
-        product_id=product["id"], cost_price="95.50", currency="EUR", stock_quantity=8,
+        cost_price="95.50", currency="EUR", stock_quantity=8,
     )
 
+    proposal_a = service.suggest_brand_mpn_matches(offer_a["id"], "Example", "X-100")
+    proposal_b = service.suggest_brand_mpn_matches(offer_b["id"], "Example", "X-100")
+    service.confirm_match(proposal_a[0]["id"], expected_tenant_id=tenant_id, reviewer="reviewer")
+    service.confirm_match(proposal_b[0]["id"], expected_tenant_id=tenant_id, reviewer="reviewer")
     assert offer_a["id"] != offer_b["id"]
-    assert offer_a["product_id"] == offer_b["product_id"] == product["id"]
+    assert offer_a["product_id"] is None and offer_b["product_id"] is None
+    with persistence.session() as session:
+        linked_a = session.get(SupplierOffer, offer_a["id"])
+        linked_b = session.get(SupplierOffer, offer_b["id"])
+        assert linked_a.product_id == linked_b.product_id == product["id"]
     assert offer_a["supplier_id"] != offer_b["supplier_id"]
     with persistence.session() as session:
         assert session.scalar(select(ProductMaster).where(
