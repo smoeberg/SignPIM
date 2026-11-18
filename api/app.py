@@ -559,6 +559,64 @@ def match_catalog_offer_by_gtin(
     return match
 
 
+@app.post("/catalog/offers/{offer_id}/match-brand-mpn", tags=["catalog"])
+def propose_catalog_match_by_brand_mpn(
+    offer_id: str,
+    brand: str = Query(..., min_length=1),
+    mpn: str = Query(..., min_length=1),
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return ProductMasterService(persistence).suggest_brand_mpn_matches(
+            offer_id, brand, mpn, expected_tenant_id=t.id
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+@app.post("/catalog/matches/{match_id}/confirm", tags=["catalog"])
+def confirm_catalog_match(
+    match_id: str,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    reviewer = str(info.get("user_id") or info.get("key_id") or "api")
+    try:
+        return ProductMasterService(persistence).confirm_match(
+            match_id, expected_tenant_id=t.id, reviewer=reviewer
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+@app.post("/catalog/matches/{match_id}/reject", tags=["catalog"])
+def reject_catalog_match(
+    match_id: str,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    reviewer = str(info.get("user_id") or info.get("key_id") or "api")
+    try:
+        return ProductMasterService(persistence).reject_match(
+            match_id, expected_tenant_id=t.id, reviewer=reviewer
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
 # ---------- products ----------
 @app.post("/products", tags=["products"])
 def upsert_product(product: ProductIn, tenant: str = "default",
