@@ -39,6 +39,10 @@ class Tenant(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     products = relationship("Product", back_populates="tenant", cascade="all, delete-orphan")
+    product_masters = relationship(
+        "ProductMaster", back_populates="tenant", cascade="all, delete-orphan"
+    )
+    suppliers = relationship("Supplier", back_populates="tenant", cascade="all, delete-orphan")
     rules = relationship("Rule", back_populates="tenant", cascade="all, delete-orphan")
     normalization_mappings = relationship(
         "NormalizationMapping", back_populates="tenant", cascade="all, delete-orphan"
@@ -136,6 +140,9 @@ class Supplier(Base):
         Index("idx_suppliers_tenant_status", "tenant_id", "status"),
     )
 
+    tenant = relationship("Tenant", back_populates="suppliers")
+    offers = relationship("SupplierOffer", back_populates="supplier", cascade="all, delete-orphan")
+
 
 class ProductMaster(Base):
     __tablename__ = "product_master"
@@ -156,6 +163,9 @@ class ProductMaster(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
+    tenant = relationship("Tenant", back_populates="product_masters")
+    offers = relationship("SupplierOffer", back_populates="product", passive_deletes=True)
+
     __table_args__ = (
         UniqueConstraint("tenant_id", "master_sku", name="uq_product_master_tenant_sku"),
         UniqueConstraint("tenant_id", "gtin", name="uq_product_master_tenant_gtin"),
@@ -170,7 +180,7 @@ class SupplierOffer(Base):
     id = Column(String(36), primary_key=True, default=_uuid)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     supplier_id = Column(String(36), ForeignKey("suppliers.id"), nullable=False)
-    product_id = Column(String(36), ForeignKey("product_master.id"), nullable=True)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="SET NULL"), nullable=True)
     supplier_sku = Column(String(160), nullable=False)
     supplier_product_id = Column(String(255), nullable=True)
     supplier_url = Column(Text, nullable=True)
@@ -187,6 +197,15 @@ class SupplierOffer(Base):
     last_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
+
+    supplier = relationship("Supplier", back_populates="offers")
+    product = relationship("ProductMaster", back_populates="offers")
+    snapshots = relationship(
+        "SupplierOfferSnapshot", back_populates="offer", cascade="all, delete-orphan"
+    )
+    matches = relationship(
+        "ProductMatch", back_populates="offer", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         UniqueConstraint("supplier_id", "supplier_sku", name="uq_supplier_offer_supplier_sku"),
@@ -209,6 +228,8 @@ class SupplierOfferSnapshot(Base):
     raw_data = Column(JSON, nullable=False, default=dict)
     captured_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
+    offer = relationship("SupplierOffer", back_populates="snapshots")
+
     __table_args__ = (
         Index("idx_offer_snapshots_offer_time", "offer_id", "captured_at"),
     )
@@ -228,6 +249,9 @@ class ProductMatch(Base):
     reviewed_by = Column(String(255), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    offer = relationship("SupplierOffer", back_populates="matches")
+    product = relationship("ProductMaster")
 
     __table_args__ = (
         Index("idx_product_matches_offer", "offer_id", "created_at"),
