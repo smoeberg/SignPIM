@@ -155,7 +155,6 @@ class ProductMasterService:
         *,
         expected_tenant_id: Optional[str] = None,
         supplier_product_id: Optional[str] = None,
-        product_id: Optional[str] = None,
         normalized_data: Optional[Dict[str, Any]] = None,
         supplier_url: Optional[str] = None,
         title: Optional[str] = None,
@@ -185,11 +184,6 @@ class ProductMasterService:
                 raise ProductMasterError("supplier not found")
             if expected_tenant_id and supplier.tenant_id != expected_tenant_id:
                 raise ProductMasterError("supplier does not belong to tenant")
-            if product_id:
-                product = session.get(ProductMaster, product_id)
-                if product is None or product.tenant_id != supplier.tenant_id:
-                    raise ProductMasterError("product does not belong to supplier tenant")
-
             offer = session.scalar(select(SupplierOffer).where(
                 SupplierOffer.supplier_id == supplier_id,
                 SupplierOffer.supplier_sku == supplier_sku.strip(),
@@ -204,7 +198,6 @@ class ProductMasterService:
                 )
                 session.add(offer)
 
-            offer.product_id = product_id
             offer.supplier_product_id = supplier_product_id
             offer.supplier_url = supplier_url
             offer.title = title
@@ -316,3 +309,44 @@ class ProductMasterService:
                     "method", "confidence", "status", "evidence",
                 ]))
             return proposals
+
+
+    def confirm_match(
+        self, match_id: str, *, expected_tenant_id: str, reviewer: str
+    ) -> Dict[str, Any]:
+        with self.persistence.session() as session:
+            match = session.get(ProductMatch, match_id)
+            if match is None or match.tenant_id != expected_tenant_id:
+                raise ProductMasterError("product match not found")
+            if match.status != "proposed":
+                raise ProductMasterError("only proposed matches can be confirmed")
+            offer = session.get(SupplierOffer, match.offer_id)
+            if offer is None or offer.tenant_id != expected_tenant_id:
+                raise ProductMasterError("supplier offer not found")
+            match.status = "confirmed"
+            match.reviewed_by = reviewer
+            match.reviewed_at = datetime.now(timezone.utc)
+            offer.product_id = match.product_id
+            session.flush()
+            return _as_dict(match, [
+                "id", "tenant_id", "offer_id", "product_id", "method",
+                "confidence", "status", "evidence", "reviewed_by", "reviewed_at",
+            ])
+
+    def reject_match(
+        self, match_id: str, *, expected_tenant_id: str, reviewer: str
+    ) -> Dict[str, Any]:
+        with self.persistence.session() as session:
+            match = session.get(ProductMatch, match_id)
+            if match is None or match.tenant_id != expected_tenant_id:
+                raise ProductMasterError("product match not found")
+            if match.status != "proposed":
+                raise ProductMasterError("only proposed matches can be rejected")
+            match.status = "rejected"
+            match.reviewed_by = reviewer
+            match.reviewed_at = datetime.now(timezone.utc)
+            session.flush()
+            return _as_dict(match, [
+                "id", "tenant_id", "offer_id", "product_id", "method",
+                "confidence", "status", "evidence", "reviewed_by", "reviewed_at",
+            ])
