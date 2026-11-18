@@ -162,3 +162,42 @@ def test_gtin_match_does_not_silently_relink_offer(catalog):
     )
     with pytest.raises(ProductMasterError, match="already linked to a different master product"):
         service.match_offer_by_gtin(offer["id"])
+
+
+
+def test_partial_updates_preserve_unprovided_master_and_offer_fields(catalog):
+    persistence, tenant_id, service = catalog
+    product = service.upsert_product_master(
+        tenant_id, "MASTER-PARTIAL", "Original title",
+        gtin="4006381333931", brand="Original brand", mpn="ORIGINAL-MPN",
+    )
+    updated_product = service.upsert_product_master(
+        tenant_id, "MASTER-PARTIAL", "Updated title"
+    )
+    assert updated_product["gtin"] == "4006381333931"
+    assert updated_product["brand"] == "Original brand"
+    assert updated_product["mpn"] == "ORIGINAL-MPN"
+
+    supplier = service.create_supplier(tenant_id, "supplier-partial", "Supplier Partial", "adapter")
+    offer = service.upsert_supplier_offer(
+        supplier["id"], "PARTIAL-1", {"sku": "PARTIAL-1", "name": "Original"},
+        normalized_data={"name": "Normalized"}, cost_price="42.50",
+        currency="DKK", stock_quantity=9, title="Original offer title", active=False,
+    )
+    service.upsert_supplier_offer(
+        supplier["id"], "PARTIAL-1", {"sku": "PARTIAL-1", "name": "Latest source"}
+    )
+    with persistence.session() as session:
+        stored = session.get(SupplierOffer, offer["id"])
+        snapshots = session.scalars(select(SupplierOfferSnapshot).where(
+            SupplierOfferSnapshot.offer_id == offer["id"]
+        ).order_by(SupplierOfferSnapshot.captured_at)).all()
+        assert stored.raw_data["name"] == "Latest source"
+        assert stored.normalized_data == {"name": "Normalized"}
+        assert stored.cost_price == 42.5
+        assert stored.currency == "DKK"
+        assert stored.stock_quantity == 9
+        assert stored.title == "Original offer title"
+        assert stored.active is False
+        assert snapshots[-1].cost_price == 42.5
+        assert snapshots[-1].stock_quantity == 9
