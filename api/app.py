@@ -529,9 +529,10 @@ def upsert_catalog_supplier_offer(
     info: dict = Depends(require_scope("ingest:write")),
 ):
     _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
     try:
         return ProductMasterService(persistence).upsert_supplier_offer(
-            supplier_id, **body.model_dump()
+            supplier_id, expected_tenant_id=t.id, **body.model_dump()
         )
     except ProductMasterError as exc:
         status = 404 if "not found" in str(exc) else 400
@@ -548,7 +549,10 @@ def match_catalog_offer_by_gtin(
 ):
     _enforce_tenant(info, tenant)
     try:
-        match = ProductMasterService(persistence).match_offer_by_gtin(offer_id, gtin)
+        t = persistence.get_or_create_tenant(tenant)
+        match = ProductMasterService(persistence).match_offer_by_gtin(
+            offer_id, gtin, expected_tenant_id=t.id
+        )
     except ProductMasterError as exc:
         status = 404 if "not found" in str(exc) else 400
         raise HTTPException(status_code=status, detail=str(exc))
