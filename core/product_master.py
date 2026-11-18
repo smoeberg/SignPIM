@@ -77,13 +77,19 @@ class ProductMasterService:
     ) -> Dict[str, Any]:
         if not all(isinstance(v, str) and v.strip() for v in (code, name, adapter_key)):
             raise ProductMasterError("supplier code, name and adapter_key are required")
+        config = adapter_config or {}
+        if not isinstance(config, dict):
+            raise ProductMasterError("adapter_config must be an object")
+        secret_terms = ("password", "secret", "token", "api_key", "private_key")
+        if any(term in str(key).casefold() for key in config for term in secret_terms):
+            raise ProductMasterError("adapter secrets must use credential_ref, not adapter_config")
         with self.persistence.session() as session:
             supplier = Supplier(
                 tenant_id=tenant_id,
                 code=code.strip(),
                 name=name.strip(),
                 adapter_key=adapter_key.strip(),
-                adapter_config=deepcopy(adapter_config or {}),
+                adapter_config=deepcopy(config),
                 credential_ref=credential_ref,
             )
             session.add(supplier)
@@ -176,10 +182,14 @@ class ProductMasterService:
             raise ProductMasterError("raw_data must be an object")
         if normalized_data is not None and not isinstance(normalized_data, dict):
             raise ProductMasterError("normalized_data must be an object")
-        if currency and (len(currency) != 3 or not currency.isalpha()):
-            raise ProductMasterError("currency must be a three-letter code")
+        if currency is not None and (
+            len(currency) != 3 or not currency.isascii() or not currency.isalpha()
+        ):
+            raise ProductMasterError("currency must be a three-letter ISO code")
         price = _decimal(cost_price, "cost_price")
         quantity = _decimal(stock_quantity, "stock_quantity")
+        if price is not None and price < 0:
+            raise ProductMasterError("cost_price cannot be negative")
         raw_copy = deepcopy(raw_data)
         normalized_copy = deepcopy(normalized_data or {})
 
