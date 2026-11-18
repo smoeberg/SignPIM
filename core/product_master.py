@@ -153,6 +153,7 @@ class ProductMasterService:
         supplier_sku: str,
         raw_data: Dict[str, Any],
         *,
+        expected_tenant_id: Optional[str] = None,
         supplier_product_id: Optional[str] = None,
         product_id: Optional[str] = None,
         normalized_data: Optional[Dict[str, Any]] = None,
@@ -182,6 +183,8 @@ class ProductMasterService:
             supplier = session.get(Supplier, supplier_id)
             if supplier is None:
                 raise ProductMasterError("supplier not found")
+            if expected_tenant_id and supplier.tenant_id != expected_tenant_id:
+                raise ProductMasterError("supplier does not belong to tenant")
             if product_id:
                 product = session.get(ProductMaster, product_id)
                 if product is None or product.tenant_id != supplier.tenant_id:
@@ -233,7 +236,9 @@ class ProductMasterService:
                 "stock_quantity", "stock_status", "active",
             ])
 
-    def match_offer_by_gtin(self, offer_id: str, gtin: str) -> Optional[Dict[str, Any]]:
+    def match_offer_by_gtin(
+        self, offer_id: str, gtin: str, *, expected_tenant_id: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         normalized_gtin = str(gtin).strip() if gtin else ""
         if not _valid_gtin(normalized_gtin):
             return None
@@ -241,6 +246,8 @@ class ProductMasterService:
             offer = session.get(SupplierOffer, offer_id)
             if offer is None:
                 raise ProductMasterError("supplier offer not found")
+            if expected_tenant_id and offer.tenant_id != expected_tenant_id:
+                raise ProductMasterError("supplier offer does not belong to tenant")
             product = session.scalar(select(ProductMaster).where(
                 ProductMaster.tenant_id == offer.tenant_id,
                 ProductMaster.gtin == normalized_gtin,
@@ -265,7 +272,8 @@ class ProductMasterService:
             ])
 
     def suggest_brand_mpn_matches(
-        self, offer_id: str, brand: str, mpn: str
+        self, offer_id: str, brand: str, mpn: str, *,
+        expected_tenant_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Return proposals only; brand+MPN similarity never auto-links products."""
         if not brand or not mpn:
