@@ -1155,26 +1155,6 @@
             }
           },
           {
-            "name": "brand",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Brand"
-            }
-          },
-          {
-            "name": "mpn",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "title": "Mpn"
-            }
-          },
-          {
             "name": "tenant",
             "in": "query",
             "required": false,
