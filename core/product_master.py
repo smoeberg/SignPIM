@@ -282,6 +282,8 @@ class ProductMasterService:
             offer = session.get(SupplierOffer, offer_id)
             if offer is None:
                 raise ProductMasterError("supplier offer not found")
+            if expected_tenant_id and offer.tenant_id != expected_tenant_id:
+                raise ProductMasterError("supplier offer does not belong to tenant")
             candidates = session.scalars(select(ProductMaster).where(
                 ProductMaster.tenant_id == offer.tenant_id,
                 ProductMaster.brand.ilike(brand.strip()),
