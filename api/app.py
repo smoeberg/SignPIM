@@ -466,7 +466,7 @@ def health():
 
 # ---------- ingestion ----------
 @app.post("/tenants/{slug}/ingest", tags=["ingestion"])
-def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv"),
+def ingest_csv(slug: str, body: str = Query(...),
                info: dict = Depends(require_scope("ingest:write"))):
     """Ingest a raw supplier CSV feed for a tenant (Feed-First front door)."""
     if slug != _slug_of(info):
