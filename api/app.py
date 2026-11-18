@@ -178,7 +178,7 @@ class SupplierOfferIn(BaseModel):
     currency: Optional[str] = None
     stock_quantity: Optional[float] = None
     stock_status: Optional[str] = None
-    active: bool = True
+    active: Optional[bool] = None
 
 
 # ---------- export ----------
@@ -513,7 +513,7 @@ def upsert_catalog_product(
     t = persistence.get_or_create_tenant(tenant)
     try:
         return ProductMasterService(persistence).upsert_product_master(
-            t.id, **body.model_dump()
+            t.id, **body.model_dump(exclude_unset=True)
         )
     except ProductMasterError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -531,7 +531,7 @@ def upsert_catalog_supplier_offer(
     t = persistence.get_or_create_tenant(tenant)
     try:
         return ProductMasterService(persistence).upsert_supplier_offer(
-            supplier_id, expected_tenant_id=t.id, **body.model_dump()
+            supplier_id, expected_tenant_id=t.id, **body.model_dump(exclude_unset=True)
         )
     except ProductMasterError as exc:
         status = 404 if "not found" in str(exc) else 400
