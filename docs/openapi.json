@@ -2242,6 +2242,69 @@
           }
         }
       }
+    },
+    "/catalog/suppliers/{supplier_id}/import": {
+      "post": {
+        "tags": [
+          "catalog"
+        ],
+        "summary": "Import Catalog Supplier Payload",
+        "operationId": "import_catalog_supplier_payload_catalog_suppliers__supplier_id__import_post",
+        "parameters": [
+          {
+            "name": "supplier_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Supplier Id"
+            }
+          },
+          {
+            "name": "tenant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "default",
+              "title": "Tenant"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SupplierImportIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Import Catalog Supplier Payload Catalog Suppliers  Supplier Id  Import Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2296,7 +2359,7 @@
           },
           "price": {
             "type": "number",
-            "exclusiveMinimum": 0.0,
+            "exclusiveMinimum": 0,
             "title": "Price"
           },
           "ean": {
@@ -2522,6 +2585,31 @@
           "adapter_key"
         ],
         "title": "SupplierCreate"
+      },
+      "SupplierImportIn": {
+        "properties": {
+          "payload": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Payload"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "payload"
+        ],
+        "title": "SupplierImportIn"
       },
       "SupplierOfferIn": {
         "properties": {
