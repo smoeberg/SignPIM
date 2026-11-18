@@ -770,13 +770,15 @@ def poll_feed(slug: str, mode: str = Query("local", pattern="^(local|sftp)$"),
         user = _sftp("sftp.user", "SIGNPIM_SFTP_USER", "signpim")
         password = _sftp("sftp.password", "SIGNPIM_SFTP_PASSWORD")
         key_path = os.environ.get("SIGNPIM_SFTP_KEY_PATH")
+        known_hosts_path = _sftp("sftp.known_hosts_path", "SIGNPIM_SFTP_KNOWN_HOSTS")
         if not password and not key_path:
             raise HTTPException(status_code=503,
                                 detail="SFTP needs sftp.password (admin config) or SIGNPIM_SFTP_PASSWORD/SIGNPIM_SFTP_KEY_PATH")
         importer = SFTPFeedImporter(persistence, ingestion)
         return importer.poll(slug, host=host, remote_dir=remote_dir, username=user,
                              password=password, key_path=key_path,
-                             port=int(_sftp("sftp.port", "SIGNPIM_SFTP_PORT", "22")))
+                             port=int(_sftp("sftp.port", "SIGNPIM_SFTP_PORT", "22")),
+                             known_hosts_path=known_hosts_path)
     if not directory:
         raise HTTPException(status_code=400, detail="mode=local requires 'directory'")
     importer = LocalFeedImporter(persistence, ingestion)
