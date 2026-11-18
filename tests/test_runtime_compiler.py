@@ -47,3 +47,35 @@ def test_pure_graph_runtime_execution():
     res = runtime.execute(graph, {}, {"sku": "TEST-1", "images": []}, tenant_id="TENANT_ALPHA")
     assert res["tenant_id"] == "TENANT_ALPHA"
     assert "r1" in res["violations"]
+
+
+
+def test_runtime_executes_ai_images_operator_and_passes_config():
+    from engine.operators.registry import RichOperatorRegistry
+
+    seen = {}
+
+    def fake_image_operator(data, ctx):
+        seen["config"] = dict(ctx["operator_config"])
+        result = dict(data)
+        result["image_proposal"] = "candidate"
+        return result
+
+    RichOperatorRegistry.register("test_image_operator", fake_image_operator, category="ai")
+    graph = ExecutionGraph(
+        workflow_name="ImageWorkflow",
+        entity_name="Product",
+        nodes=[GraphNode(
+            node_id="image_1",
+            action_node=ActionNode(
+                action_type="ai_images",
+                operator="test_image_operator",
+                config={"mode": "match", "threshold": 0.95},
+            ),
+        )],
+    )
+    result = PureGraphRuntime().execute(
+        graph, {}, {"sku": "P-1"}, tenant_id="tenant-1"
+    )
+    assert seen["config"] == {"mode": "match", "threshold": 0.95}
+    assert result["data"]["image_proposal"] == "candidate"
