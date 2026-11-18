@@ -40,6 +40,9 @@ class SupplierRecord:
     stock_quantity: Optional[str] = None
     stock_status: Optional[str] = None
     active: Optional[bool] = None
+    rrp: Optional[str] = None
+    rrp_currency: Optional[str] = None
+    rrp_includes_vat: Optional[bool] = None
 
 
 class SupplierAdapter(Protocol):
@@ -98,6 +101,10 @@ def _record(raw: Mapping[str, Any], config: Mapping[str, Any]) -> SupplierRecord
         raise SupplierAdapterError("supplier row is missing supplier_sku")
     price = _decimal_text(get("cost_price", "price"), "cost_price")
     quantity = _decimal_text(get("stock_quantity", "quantity"), "stock_quantity")
+    rrp = _decimal_text(get("rrp", "recommended_retail_price"), "rrp")
+    rrp_vat = config.get("rrp_includes_vat")
+    if rrp_vat is not None and not isinstance(rrp_vat, bool):
+        raise SupplierAdapterError("rrp_includes_vat must be true or false")
     normalized = {
         key: _clean(get(key, *fallbacks))
         for key, fallbacks in {
@@ -119,6 +126,11 @@ def _record(raw: Mapping[str, Any], config: Mapping[str, Any]) -> SupplierRecord
         currency=_optional_text(get("currency")),
         stock_quantity=quantity,
         stock_status=_optional_text(get("stock_status")),
+        rrp=rrp,
+        rrp_currency=_optional_text(get("rrp_currency")) or (
+            _optional_text(config.get("rrp_currency")) if rrp is not None else None
+        ),
+        rrp_includes_vat=rrp_vat if rrp is not None else None,
     )
 
 
@@ -286,6 +298,9 @@ class SupplierHubService:
                     # A record present in the feed is offered again unless the
                     # supplier explicitly marks it inactive.
                     active=True if record.active is None else record.active,
+                    rrp=record.rrp,
+                    rrp_currency=record.rrp_currency,
+                    rrp_includes_vat=record.rrp_includes_vat,
                 )
                 imported += 1
                 if (record.normalized_data.get("gtin")

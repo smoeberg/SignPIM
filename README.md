@@ -128,3 +128,22 @@ Example supplier configuration:
 SFTP connections now reject unknown SSH host keys. Configure a trusted known_hosts file through `sftp.known_hosts_path` or `SIGNPIM_SFTP_KNOWN_HOSTS`.
 
 See [ADR-016](docs/adr/ADR-016_Product_Master_Supplier_Offer.md) for the domain decision. The previous /products and generic feed ingestion paths are legacy surfaces; new supplier adapters and sales-channel integrations must be built on the canonical model.
+
+
+## Pricing engine (ADR-017)
+
+SignPIM calculates **one price excl. VAT in EUR per product and channel** (PrestaShop shop). The shop applies VAT and converts to the customer's currency.
+
+```
+supplier cost -> EUR (+FX buffer) -> landed cost -> rule (markup | margin | fixed)
+  -> optional rounding -> floor check -> approval check -> PriceCalculation
+```
+
+- Rules per tenant, channel, category or product; the most specific wins. Fixed prices are product-only.
+- Percentages are plain percent: `{"method": "markup", "value": "30"}` = 30 % avance (€100 -> €130, dækningsgrad 23.08 %); `"margin"` = dækningsgrad.
+- Floors (`min_price`, `min_margin_pct`) block a price; they never raise it silently.
+- Changes above the channel's `approval_threshold_pct` (default 10 %) wait for approval.
+- Psychological prices are computed incl. VAT: `rounding: {"DKK": {"step": "10", "minus": "0.05"}}` gives x9.95 DKK as a fixed local price for PrestaShop `specific_price`.
+- `PublishedPrice` keeps what was live per channel; `/lowest?days=30` answers the Omnibus "før"-pris question.
+
+See `docs/adr/ADR-017_Central_Pricing_Engine.md` for the full design.

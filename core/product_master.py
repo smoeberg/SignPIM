@@ -84,6 +84,8 @@ class ProductMasterService:
         adapter_key: str,
         adapter_config: Optional[Dict[str, Any]] = None,
         credential_ref: Optional[str] = None,
+        landed_cost_pct: Any = None,
+        landed_cost_fixed_eur: Any = None,
     ) -> Dict[str, Any]:
         if not all(isinstance(v, str) and v.strip() for v in (code, name, adapter_key)):
             raise ProductMasterError("supplier code, name and adapter_key are required")
@@ -93,8 +95,14 @@ class ProductMasterService:
         secret_terms = ("password", "secret", "token", "api_key", "private_key")
         if any(term in str(key).casefold() for key in config for term in secret_terms):
             raise ProductMasterError("adapter secrets must use credential_ref, not adapter_config")
+        surcharge_pct = _decimal(landed_cost_pct, "landed_cost_pct") or Decimal(0)
+        surcharge_fixed = _decimal(landed_cost_fixed_eur, "landed_cost_fixed_eur") or Decimal(0)
+        if surcharge_pct < 0 or surcharge_fixed < 0:
+            raise ProductMasterError("landed cost surcharges cannot be negative")
         with self.persistence.session() as session:
             supplier = Supplier(
+                landed_cost_pct=surcharge_pct,
+                landed_cost_fixed_eur=surcharge_fixed,
                 tenant_id=tenant_id,
                 code=code.strip(),
                 name=name.strip(),
@@ -106,7 +114,8 @@ class ProductMasterService:
             session.flush()
             return _as_dict(supplier, [
                 "id", "tenant_id", "code", "name", "adapter_key", "status",
-                "adapter_config", "credential_ref",
+                "adapter_config", "credential_ref", "landed_cost_pct",
+                "landed_cost_fixed_eur",
             ])
 
     def upsert_product_master(
@@ -119,6 +128,7 @@ class ProductMasterService:
         brand: Optional[str] = None,
         manufacturer: Optional[str] = None,
         mpn: Optional[str] = None,
+        category: Optional[str] = None,
         description: Optional[str] = None,
         attributes: Optional[Dict[str, Any]] = None,
         translations: Optional[Dict[str, Any]] = None,
@@ -164,6 +174,8 @@ class ProductMasterService:
                 product.manufacturer = manufacturer
             if mpn is not None:
                 product.mpn = mpn
+            if category is not None:
+                product.category = category.strip() or None
             if description is not None:
                 product.description = description
             if attributes is not None:
@@ -175,7 +187,7 @@ class ProductMasterService:
             session.flush()
             return _as_dict(product, [
                 "id", "tenant_id", "master_sku", "gtin", "brand",
-                "manufacturer", "mpn", "name", "description", "attributes",
+                "manufacturer", "mpn", "name", "category", "description", "attributes",
                 "translations", "status", "version",
             ])
 
@@ -196,6 +208,9 @@ class ProductMasterService:
         stock_quantity: Any = None,
         stock_status: Optional[str] = None,
         active: Optional[bool] = None,
+        rrp: Any = None,
+        rrp_currency: Optional[str] = None,
+        rrp_includes_vat: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if not supplier_sku or not supplier_sku.strip():
             raise ProductMasterError("supplier_sku is required")
@@ -203,10 +218,14 @@ class ProductMasterService:
             raise ProductMasterError("raw_data must be an object")
         if normalized_data is not None and not isinstance(normalized_data, dict):
             raise ProductMasterError("normalized_data must be an object")
-        if currency is not None and (
-            len(currency) != 3 or not currency.isascii() or not currency.isalpha()
-        ):
-            raise ProductMasterError("currency must be a three-letter ISO code")
+        for code_value, label in ((currency, "currency"), (rrp_currency, "rrp_currency")):
+            if code_value is not None and (
+                len(code_value) != 3 or not code_value.isascii() or not code_value.isalpha()
+            ):
+                raise ProductMasterError(f"{label} must be a three-letter ISO code")
+        rrp_value = _decimal(rrp, "rrp")
+        if rrp_value is not None and rrp_value < 0:
+            raise ProductMasterError("rrp cannot be negative")
         price = _decimal(cost_price, "cost_price")
         quantity = _decimal(stock_quantity, "stock_quantity")
         if price is not None and price < 0:
@@ -259,6 +278,12 @@ class ProductMasterService:
                 offer.stock_status = stock_status
             if active is not None:
                 offer.active = active
+            if rrp_value is not None:
+                offer.rrp = rrp_value
+            if rrp_currency is not None:
+                offer.rrp_currency = rrp_currency.upper()
+            if rrp_includes_vat is not None:
+                offer.rrp_includes_vat = rrp_includes_vat
             offer.last_seen_at = now
             session.flush()
 
@@ -284,6 +309,7 @@ class ProductMasterService:
                 "supplier_product_id", "supplier_url", "title", "description",
                 "raw_data", "normalized_data", "cost_price", "currency",
                 "stock_quantity", "stock_status", "active",
+                "rrp", "rrp_currency", "rrp_includes_vat",
             ])
 
     def match_offer_by_gtin(

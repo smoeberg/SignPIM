@@ -7,7 +7,7 @@ SQLite-compatible for tests (JSONB -> JSON via variant), PostgreSQL in productio
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, String, Text, Integer, Boolean, DateTime, Numeric,
+    Column, String, Text, Integer, Boolean, Date, DateTime, Numeric,
     ForeignKey, UniqueConstraint, Index, JSON,
 )
 from sqlalchemy.orm import declarative_base, relationship
@@ -132,6 +132,10 @@ class Supplier(Base):
     status = Column(String(24), nullable=False, default="active")
     adapter_config = Column(JSON, nullable=False, default=dict)
     credential_ref = Column(String(255), nullable=True)
+    # Landed cost: supplier cost in EUR * (1 + pct) + fixed EUR per unit
+    # (freight, dropshipping fee). Used by the pricing engine (ADR-017).
+    landed_cost_pct = Column(Numeric(7, 4), nullable=False, default=0)
+    landed_cost_fixed_eur = Column(Numeric(14, 4), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     updated_at = Column(DateTime(timezone=True), nullable=False, default=_now, onupdate=_now)
 
@@ -158,6 +162,7 @@ class ProductMaster(Base):
     manufacturer = Column(String(255), nullable=True)
     mpn = Column(String(128), nullable=True)
     name = Column(String(512), nullable=False)
+    category = Column(String(255), nullable=True)
     description = Column(Text, nullable=True)
     attributes = Column(JSON, nullable=False, default=dict)
     translations = Column(JSON, nullable=False, default=dict)
@@ -195,6 +200,10 @@ class SupplierOffer(Base):
     currency = Column(String(3), nullable=True)
     stock_quantity = Column(Numeric(14, 3), nullable=True)
     stock_status = Column(String(32), nullable=True)
+    # Supplier's recommended retail price (vejledende udsalgspris).
+    rrp = Column(Numeric(14, 4), nullable=True)
+    rrp_currency = Column(String(3), nullable=True)
+    rrp_includes_vat = Column(Boolean, nullable=True)
     active = Column(Boolean, nullable=False, default=True)
     first_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     last_seen_at = Column(DateTime(timezone=True), nullable=False, default=_now)
@@ -259,4 +268,133 @@ class ProductMatch(Base):
     __table_args__ = (
         Index("idx_product_matches_offer", "offer_id", "created_at"),
         Index("idx_product_matches_tenant_status", "tenant_id", "status"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Pricing domain (ADR-017): one EUR price excl. VAT per product and channel.
+# ---------------------------------------------------------------------------
+
+class Channel(Base):
+    """One sales channel, e.g. a PrestaShop shop."""
+    __tablename__ = "channels"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    code = Column(String(96), nullable=False)
+    name = Column(String(255), nullable=False)
+    platform = Column(String(32), nullable=False, default="prestashop")
+    base_currency = Column(String(3), nullable=False, default="EUR")
+    vat_rate_pct = Column(Numeric(7, 4), nullable=False, default=0)
+    rounding = Column(JSON, nullable=False, default=dict)
+    fx_buffer_pct = Column(Numeric(7, 4), nullable=False, default=0)
+    approval_threshold_pct = Column(Numeric(7, 4), nullable=False, default=10)
+    preferred_supplier_id = Column(String(36), ForeignKey("suppliers.id"), nullable=True)
+    status = Column(String(24), nullable=False, default="active")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "code", name="uq_channels_tenant_code"),
+    )
+
+
+class PriceRule(Base):
+    """Markup, margin or fixed price for a scope (tenant/channel/category/product)."""
+    __tablename__ = "price_rules"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id"), nullable=True)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=True)
+    category = Column(String(255), nullable=True)
+    method = Column(String(16), nullable=False)          # markup | margin | fixed
+    value = Column(Numeric(14, 6), nullable=False)        # percent (30 = 30 %), or EUR for fixed
+    priority = Column(Integer, nullable=False, default=0)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("idx_price_rules_tenant", "tenant_id", "active"),
+    )
+
+
+class PriceFloor(Base):
+    """Minimum price excl. VAT (EUR) and/or minimum margin (dækningsgrad)."""
+    __tablename__ = "price_floors"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id"), nullable=True)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=True)
+    category = Column(String(255), nullable=True)
+    min_price = Column(Numeric(14, 4), nullable=True)
+    min_margin_pct = Column(Numeric(9, 4), nullable=True)
+    active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("idx_price_floors_tenant", "tenant_id", "active"),
+    )
+
+
+class ExchangeRate(Base):
+    """Units of ``currency`` per 1 EUR, valid from ``valid_on``. Tenant-scoped."""
+    __tablename__ = "exchange_rates"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    currency = Column(String(3), nullable=False)
+    rate = Column(Numeric(18, 8), nullable=False)
+    valid_on = Column(Date, nullable=False)
+    source = Column(String(64), nullable=False, default="manual")
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "currency", "valid_on", name="uq_exchange_rate_tenant_currency_day"),
+    )
+
+
+class PriceCalculation(Base):
+    """Audit record of one price calculation for a product in a channel."""
+    __tablename__ = "price_calculations"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id"), nullable=False)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=False)
+    offer_id = Column(String(36), ForeignKey("supplier_offers.id", ondelete="SET NULL"), nullable=True)
+    rule_id = Column(String(36), ForeignKey("price_rules.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(24), nullable=False)  # approved|pending_review|blocked|rejected|superseded
+    price_ex_vat = Column(Numeric(14, 6), nullable=True)   # EUR, the price sent to the shop
+    cost_eur = Column(Numeric(14, 6), nullable=True)       # landed cost used
+    margin_pct = Column(Numeric(12, 4), nullable=True)     # dækningsgrad in percent
+    markup_pct = Column(Numeric(14, 4), nullable=True)     # avance in percent
+    breakdown = Column(JSON, nullable=False, default=dict)
+    reasons = Column(JSON, nullable=False, default=list)
+    warnings = Column(JSON, nullable=False, default=list)
+    reviewed_by = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("idx_price_calc_product_channel", "product_id", "channel_id", "created_at"),
+        Index("idx_price_calc_tenant_status", "tenant_id", "status"),
+    )
+
+
+class PublishedPrice(Base):
+    """A price actually pushed to a channel. Basis for the 30-day lowest price."""
+    __tablename__ = "published_prices"
+
+    id = Column(String(36), primary_key=True, default=_uuid)
+    tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
+    channel_id = Column(String(36), ForeignKey("channels.id"), nullable=False)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=False)
+    calculation_id = Column(String(36), ForeignKey("price_calculations.id", ondelete="SET NULL"), nullable=True)
+    price_ex_vat = Column(Numeric(14, 6), nullable=False)
+    local_prices = Column(JSON, nullable=False, default=dict)
+    published_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+
+    __table_args__ = (
+        Index("idx_published_prices_lookup", "product_id", "channel_id", "published_at"),
     )

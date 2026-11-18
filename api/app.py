@@ -11,6 +11,8 @@ Endpoints:
   POST /mappings                     add a normalization mapping
 """
 import logging
+from datetime import date
+from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Body
@@ -20,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from core.persistence import PersistenceService
 from core.product_master import ProductMasterService, ProductMasterError
+from core.pricing import PricingService, PricingError
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 from services.images import ImageService, ImageError
@@ -157,6 +160,8 @@ class SupplierCreate(BaseModel):
     adapter_key: str = Field(min_length=1, max_length=128)
     adapter_config: Dict[str, Any] = Field(default_factory=dict)
     credential_ref: Optional[str] = None
+    landed_cost_pct: Optional[Decimal] = Field(default=None, ge=0)
+    landed_cost_fixed_eur: Optional[Decimal] = Field(default=None, ge=0)
 
 
 class SupplierImportIn(BaseModel):
@@ -171,6 +176,7 @@ class ProductMasterIn(BaseModel):
     brand: Optional[str] = None
     manufacturer: Optional[str] = None
     mpn: Optional[str] = None
+    category: Optional[str] = None
     description: Optional[str] = None
     attributes: Dict[str, Any] = Field(default_factory=dict)
     translations: Dict[str, Any] = Field(default_factory=dict)
@@ -189,6 +195,54 @@ class SupplierOfferIn(BaseModel):
     stock_quantity: Optional[float] = None
     stock_status: Optional[str] = None
     active: Optional[bool] = None
+    rrp: Optional[Decimal] = None
+    rrp_currency: Optional[str] = None
+    rrp_includes_vat: Optional[bool] = None
+
+
+class ChannelIn(BaseModel):
+    code: str = Field(min_length=1, max_length=96)
+    name: str = Field(min_length=1, max_length=255)
+    platform: str = "prestashop"
+    base_currency: str = "EUR"
+    vat_rate_pct: Decimal = Field(default=Decimal(0), ge=0, lt=100)
+    rounding: Dict[str, Dict[str, str]] = Field(
+        default_factory=dict,
+        description='Per currency, e.g. {"DKK": {"step": "10", "minus": "0.05"}} -> x9.95',
+    )
+    fx_buffer_pct: Decimal = Field(default=Decimal(0), ge=0)
+    approval_threshold_pct: Decimal = Field(default=Decimal(10), ge=0)
+    preferred_supplier_id: Optional[str] = None
+
+
+class PriceRuleIn(BaseModel):
+    method: str = Field(pattern="^(markup|margin|fixed)$",
+                        description="markup = avance, margin = dækningsgrad, fixed = EUR excl. VAT")
+    value: Decimal = Field(description="Percent for markup/margin (30 = 30 %), EUR for fixed")
+    channel_id: Optional[str] = None
+    product_id: Optional[str] = None
+    category: Optional[str] = None
+    priority: int = 0
+
+
+class PriceFloorIn(BaseModel):
+    min_price: Optional[Decimal] = Field(default=None, description="EUR excl. VAT")
+    min_margin_pct: Optional[Decimal] = Field(default=None, description="Dækningsgrad in percent")
+    channel_id: Optional[str] = None
+    product_id: Optional[str] = None
+    category: Optional[str] = None
+
+
+class ExchangeRateIn(BaseModel):
+    currency: str = Field(min_length=3, max_length=3)
+    rate: Decimal = Field(gt=0, description="Units of currency per 1 EUR")
+    valid_on: Optional[date] = None
+    source: str = "manual"
+
+
+class PriceCalculateIn(BaseModel):
+    product_id: Optional[str] = Field(
+        default=None, description="Omit to recalculate every matched product in the channel")
 
 
 # ---------- export ----------
@@ -533,6 +587,8 @@ def create_catalog_supplier(
         return ProductMasterService(persistence).create_supplier(
             t.id, body.code, body.name, body.adapter_key,
             body.adapter_config, body.credential_ref,
+            landed_cost_pct=body.landed_cost_pct,
+            landed_cost_fixed_eur=body.landed_cost_fixed_eur,
         )
     except ProductMasterError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -649,6 +705,137 @@ def reject_catalog_match(
     except ProductMasterError as exc:
         status = 404 if "not found" in str(exc) else 400
         raise HTTPException(status_code=status, detail=str(exc))
+
+
+# ---------- pricing (ADR-017) ----------
+def _pricing_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except PricingError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+def _reviewer(info: dict) -> str:
+    return str(info.get("user_id") or info.get("key_id") or "api")
+
+
+@app.post("/catalog/channels", tags=["pricing"])
+def create_channel(body: ChannelIn, tenant: str = "default",
+                   persistence: PersistenceService = Depends(get_persistence),
+                   info: dict = Depends(require_scope("pricing:write"))):
+    """Create a sales channel (shop). Prices are calculated in EUR excl. VAT."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    data = body.model_dump()
+    return _pricing_call(PricingService(persistence).create_channel,
+                         t.id, data.pop("code"), data.pop("name"), **data)
+
+
+@app.post("/catalog/price-rules", tags=["pricing"])
+def create_price_rule(body: PriceRuleIn, tenant: str = "default",
+                      persistence: PersistenceService = Depends(get_persistence),
+                      info: dict = Depends(require_scope("pricing:write"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    data = body.model_dump()
+    return _pricing_call(PricingService(persistence).create_rule,
+                         t.id, data.pop("method"), data.pop("value"), **data)
+
+
+@app.get("/catalog/price-rules", tags=["pricing"])
+def list_price_rules(tenant: str = "default",
+                     persistence: PersistenceService = Depends(get_persistence),
+                     info: dict = Depends(require_scope("products:read"))):
+    """Active rules in precedence order (most specific first)."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return PricingService(persistence).list_rules(t.id)
+
+
+@app.delete("/catalog/price-rules/{rule_id}", tags=["pricing"])
+def deactivate_price_rule(rule_id: str, tenant: str = "default",
+                          persistence: PersistenceService = Depends(get_persistence),
+                          info: dict = Depends(require_scope("pricing:write"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _pricing_call(PricingService(persistence).deactivate_rule, t.id, rule_id)
+
+
+@app.post("/catalog/price-floors", tags=["pricing"])
+def create_price_floor(body: PriceFloorIn, tenant: str = "default",
+                       persistence: PersistenceService = Depends(get_persistence),
+                       info: dict = Depends(require_scope("pricing:write"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _pricing_call(PricingService(persistence).create_floor, t.id, **body.model_dump())
+
+
+@app.put("/catalog/exchange-rates", tags=["pricing"])
+def set_exchange_rate(body: ExchangeRateIn, tenant: str = "default",
+                      persistence: PersistenceService = Depends(get_persistence),
+                      info: dict = Depends(require_scope("pricing:write"))):
+    """Set units of currency per 1 EUR for a day (per tenant)."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _pricing_call(PricingService(persistence).set_exchange_rate,
+                         t.id, body.currency, body.rate, valid_on=body.valid_on, source=body.source)
+
+
+@app.post("/catalog/channels/{channel_id}/prices/calculate", tags=["pricing"])
+def calculate_prices(channel_id: str, body: PriceCalculateIn, tenant: str = "default",
+                     persistence: PersistenceService = Depends(get_persistence),
+                     info: dict = Depends(require_scope("products:write"))):
+    """Calculate the price for one product, or for all matched products in the channel."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    service = PricingService(persistence)
+    if body.product_id:
+        return _pricing_call(service.calculate, t.id, channel_id, body.product_id)
+    return _pricing_call(service.calculate_channel, t.id, channel_id)
+
+
+@app.post("/catalog/price-calculations/{calc_id}/approve", tags=["pricing"])
+def approve_price(calc_id: str, tenant: str = "default",
+                  persistence: PersistenceService = Depends(get_persistence),
+                  info: dict = Depends(require_scope("pricing:approve"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _pricing_call(PricingService(persistence).approve, t.id, calc_id, _reviewer(info))
+
+
+@app.post("/catalog/price-calculations/{calc_id}/reject", tags=["pricing"])
+def reject_price(calc_id: str, tenant: str = "default",
+                 persistence: PersistenceService = Depends(get_persistence),
+                 info: dict = Depends(require_scope("pricing:approve"))):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _pricing_call(PricingService(persistence).reject, t.id, calc_id, _reviewer(info))
+
+
+@app.post("/catalog/price-calculations/{calc_id}/published", tags=["pricing"])
+def mark_price_published(calc_id: str, tenant: str = "default",
+                         persistence: PersistenceService = Depends(get_persistence),
+                         info: dict = Depends(require_scope("ingest:write"))):
+    """Called by the channel connector once the approved price is live in the shop."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    return _pricing_call(PricingService(persistence).record_published, t.id, calc_id)
+
+
+@app.get("/catalog/channels/{channel_id}/prices/{product_id}/lowest", tags=["pricing"])
+def lowest_published_price(channel_id: str, product_id: str, days: int = Query(30, gt=0, le=365),
+                           tenant: str = "default",
+                           persistence: PersistenceService = Depends(get_persistence),
+                           info: dict = Depends(require_scope("products:read"))):
+    """Lowest published price in the last N days (Omnibus reference for "før"-priser)."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    result = _pricing_call(PricingService(persistence).lowest_published,
+                           t.id, channel_id, product_id, days)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No published prices")
+    return result
 
 
 # ---------- products ----------
