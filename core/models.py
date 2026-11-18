@@ -165,6 +165,7 @@ class ProductMaster(Base):
 
     tenant = relationship("Tenant", back_populates="product_masters")
     offers = relationship("SupplierOffer", back_populates="product", passive_deletes=True)
+    matches = relationship("ProductMatch", back_populates="product", cascade="all, delete-orphan")
 
     __table_args__ = (
         UniqueConstraint("tenant_id", "master_sku", name="uq_product_master_tenant_sku"),
@@ -241,7 +242,7 @@ class ProductMatch(Base):
     id = Column(String(36), primary_key=True, default=_uuid)
     tenant_id = Column(String(36), ForeignKey("tenants.id"), nullable=False)
     offer_id = Column(String(36), ForeignKey("supplier_offers.id"), nullable=False)
-    product_id = Column(String(36), ForeignKey("product_master.id"), nullable=False)
+    product_id = Column(String(36), ForeignKey("product_master.id", ondelete="CASCADE"), nullable=False)
     method = Column(String(32), nullable=False)
     confidence = Column(Numeric(5, 4), nullable=False)
     status = Column(String(24), nullable=False, default="proposed")
@@ -251,7 +252,7 @@ class ProductMatch(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
 
     offer = relationship("SupplierOffer", back_populates="matches")
-    product = relationship("ProductMaster")
+    product = relationship("ProductMaster", back_populates="matches")
 
     __table_args__ = (
         Index("idx_product_matches_offer", "offer_id", "created_at"),
