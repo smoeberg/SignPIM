@@ -52,7 +52,8 @@ def test_sftp_credentials_from_db(env, monkeypatch):
 
     seen = {}
 
-    def _fake_connect(self, host, port, username, password=None, key_path=None):
+    def _fake_connect(self, host, port, username, password=None, key_path=None,
+                      known_hosts_path=None):
         seen.update(host=host, username=username, password=password)
         return _FakeClient()
 
