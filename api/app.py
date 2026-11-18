@@ -170,7 +170,6 @@ class SupplierOfferIn(BaseModel):
     supplier_sku: str = Field(min_length=1, max_length=160)
     raw_data: Dict[str, Any]
     supplier_product_id: Optional[str] = None
-    product_id: Optional[str] = None
     normalized_data: Dict[str, Any] = Field(default_factory=dict)
     supplier_url: Optional[str] = None
     title: Optional[str] = None
@@ -542,7 +541,6 @@ def upsert_catalog_supplier_offer(
 @app.post("/catalog/offers/{offer_id}/match-gtin", tags=["catalog"])
 def match_catalog_offer_by_gtin(
     offer_id: str,
-    gtin: str = Query(..., min_length=8, max_length=14),
     tenant: str = "default",
     persistence: PersistenceService = Depends(get_persistence),
     info: dict = Depends(require_scope("products:write")),
@@ -551,7 +549,7 @@ def match_catalog_offer_by_gtin(
     try:
         t = persistence.get_or_create_tenant(tenant)
         match = ProductMasterService(persistence).match_offer_by_gtin(
-            offer_id, gtin, expected_tenant_id=t.id
+            offer_id, expected_tenant_id=t.id
         )
     except ProductMasterError as exc:
         status = 404 if "not found" in str(exc) else 400
