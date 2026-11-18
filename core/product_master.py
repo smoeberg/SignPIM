@@ -237,17 +237,26 @@ class ProductMasterService:
             ])
 
     def match_offer_by_gtin(
-        self, offer_id: str, gtin: str, *, expected_tenant_id: Optional[str] = None
+        self, offer_id: str, gtin: Optional[str] = None, *,
+        expected_tenant_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
-        normalized_gtin = str(gtin).strip() if gtin else ""
-        if not _valid_gtin(normalized_gtin):
-            return None
         with self.persistence.session() as session:
             offer = session.get(SupplierOffer, offer_id)
             if offer is None:
                 raise ProductMasterError("supplier offer not found")
             if expected_tenant_id and offer.tenant_id != expected_tenant_id:
                 raise ProductMasterError("supplier offer does not belong to tenant")
+            source_gtin = (
+                (offer.normalized_data or {}).get("gtin")
+                or (offer.normalized_data or {}).get("ean")
+                or (offer.raw_data or {}).get("gtin")
+                or (offer.raw_data or {}).get("ean")
+            )
+            normalized_gtin = str(source_gtin).strip() if source_gtin else ""
+            if gtin is not None and str(gtin).strip() != normalized_gtin:
+                raise ProductMasterError("provided GTIN does not match supplier source data")
+            if not _valid_gtin(normalized_gtin):
+                return None
             product = session.scalar(select(ProductMaster).where(
                 ProductMaster.tenant_id == offer.tenant_id,
                 ProductMaster.gtin == normalized_gtin,
