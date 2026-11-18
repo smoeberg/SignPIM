@@ -117,3 +117,17 @@ def test_invalid_gtin_is_rejected_for_canonical_product(catalog):
         service.upsert_product_master(
             tenant_id, "MASTER-BAD", "Bad GTIN product", gtin="4006381333932"
         )
+
+
+
+def test_gtin_match_cannot_override_supplier_source_identity(catalog):
+    _, tenant_id, service = catalog
+    supplier = service.create_supplier(tenant_id, "supplier-a", "Supplier A", "adapter_a")
+    service.upsert_product_master(
+        tenant_id, "MASTER-GTIN", "Example product", gtin="4006381333931"
+    )
+    offer = service.upsert_supplier_offer(
+        supplier["id"], "SUP-GTIN", {"gtin": "4006381333931"}
+    )
+    with pytest.raises(ProductMasterError, match="does not match supplier source data"):
+        service.match_offer_by_gtin(offer["id"], "4006381333932")
