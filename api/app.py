@@ -23,7 +23,9 @@ from core.product_master import ProductMasterService, ProductMasterError
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 from services.images import ImageService, ImageError
-from services.supplier_adapters import SupplierHubService, SupplierAdapterError
+from services.supplier_adapters import (
+    SupplierHubService, SupplierAdapterError, SupplierAdapterRegistry,
+)
 
 logger = logging.getLogger("signpim.api")
 
@@ -54,6 +56,8 @@ LLMCallLogger.bind(persistence)
 kernel = PlatformKernel(meta_dir="meta")
 kernel.bootstrap()
 ingestion = CSVIngestionService(persistence, kernel)
+# Extension point: register vendor-specific adapters here during application startup.
+supplier_adapter_registry = SupplierAdapterRegistry.with_builtins()
 
 
 def _rescore_product(tenant_id: str, sku: str) -> None:
@@ -502,7 +506,9 @@ def import_catalog_supplier_payload(
     _enforce_tenant(info, tenant)
     t = persistence.get_or_create_tenant(tenant)
     try:
-        return SupplierHubService(persistence).import_payload(
+        return SupplierHubService(
+            persistence, registry=supplier_adapter_registry
+        ).import_payload(
             supplier_id,
             body.payload,
             expected_tenant_id=t.id,
