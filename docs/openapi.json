@@ -2219,80 +2219,6 @@
         ],
         "title": "ProductIn"
       },
-      "RuleIn": {
-        "properties": {
-          "rule_id": {
-            "type": "string",
-            "title": "Rule Id"
-          },
-          "category": {
-            "type": "string",
-            "title": "Category",
-            "default": "consistency"
-          },
-          "severity": {
-            "type": "string",
-            "title": "Severity",
-            "default": "info"
-          },
-          "parameters": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parameters",
-            "default": {}
-          },
-          "global_rule": {
-            "type": "boolean",
-            "title": "Global Rule",
-            "default": false
-          }
-        },
-        "type": "object",
-        "required": [
-          "rule_id"
-        ],
-        "title": "RuleIn"
-      },
-      "ValidationError": {
-        "properties": {
-          "loc": {
-            "items": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "integer"
-                }
-              ]
-            },
-            "type": "array",
-            "title": "Location"
-          },
-          "msg": {
-            "type": "string",
-            "title": "Message"
-          },
-          "type": {
-            "type": "string",
-            "title": "Error Type"
-          },
-          "input": {
-            "title": "Input"
-          },
-          "ctx": {
-            "type": "object",
-            "title": "Context"
-          }
-        },
-        "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
-        "title": "ValidationError"
-      },
       "ProductMasterIn": {
         "properties": {
           "master_sku": {
@@ -2379,6 +2305,40 @@
           "name"
         ],
         "title": "ProductMasterIn"
+      },
+      "RuleIn": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "category": {
+            "type": "string",
+            "title": "Category",
+            "default": "consistency"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "default": "info"
+          },
+          "parameters": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameters",
+            "default": {}
+          },
+          "global_rule": {
+            "type": "boolean",
+            "title": "Global Rule",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id"
+        ],
+        "title": "RuleIn"
       },
       "SupplierCreate": {
         "properties": {
@@ -2554,6 +2514,46 @@
           "raw_data"
         ],
         "title": "SupplierOfferIn"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
       }
     }
   }
