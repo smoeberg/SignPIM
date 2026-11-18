@@ -112,7 +112,7 @@ class ProductMasterService:
         if not name or not name.strip():
             raise ProductMasterError("name is required")
         normalized_gtin = str(gtin).strip() if gtin else None
-        if normalized_gtin and not _valid_gtin(normalized_gtin):
+        if gtin is not None and normalized_gtin and not _valid_gtin(normalized_gtin):
             raise ProductMasterError("gtin has an invalid length or check digit")
 
         with self.persistence.session() as session:
@@ -129,11 +129,16 @@ class ProductMasterService:
                 )
                 session.add(product)
             product.name = name.strip()
-            product.gtin = normalized_gtin
-            product.brand = brand
-            product.manufacturer = manufacturer
-            product.mpn = mpn
-            product.description = description
+            if gtin is not None:
+                product.gtin = normalized_gtin
+            if brand is not None:
+                product.brand = brand
+            if manufacturer is not None:
+                product.manufacturer = manufacturer
+            if mpn is not None:
+                product.mpn = mpn
+            if description is not None:
+                product.description = description
             if attributes is not None:
                 product.attributes = deepcopy(attributes)
             if translations is not None:
@@ -163,7 +168,7 @@ class ProductMasterService:
         currency: Optional[str] = None,
         stock_quantity: Any = None,
         stock_status: Optional[str] = None,
-        active: bool = True,
+        active: Optional[bool] = None,
     ) -> Dict[str, Any]:
         if not supplier_sku or not supplier_sku.strip():
             raise ProductMasterError("supplier_sku is required")
@@ -198,27 +203,37 @@ class ProductMasterService:
                 )
                 session.add(offer)
 
-            offer.supplier_product_id = supplier_product_id
-            offer.supplier_url = supplier_url
-            offer.title = title
-            offer.description = description
+            if supplier_product_id is not None:
+                offer.supplier_product_id = supplier_product_id
+            if supplier_url is not None:
+                offer.supplier_url = supplier_url
+            if title is not None:
+                offer.title = title
+            if description is not None:
+                offer.description = description
             offer.raw_data = raw_copy
-            offer.normalized_data = normalized_copy
-            offer.cost_price = price
-            offer.currency = currency.upper() if currency else None
-            offer.stock_quantity = quantity
-            offer.stock_status = stock_status
-            offer.active = active
+            if normalized_data is not None:
+                offer.normalized_data = normalized_copy
+            if price is not None:
+                offer.cost_price = price
+            if currency is not None:
+                offer.currency = currency.upper()
+            if quantity is not None:
+                offer.stock_quantity = quantity
+            if stock_status is not None:
+                offer.stock_status = stock_status
+            if active is not None:
+                offer.active = active
             offer.last_seen_at = now
             session.flush()
 
             session.add(SupplierOfferSnapshot(
                 tenant_id=supplier.tenant_id,
                 offer_id=offer.id,
-                cost_price=price,
+                cost_price=offer.cost_price,
                 currency=offer.currency,
-                stock_quantity=quantity,
-                stock_status=stock_status,
+                stock_quantity=offer.stock_quantity,
+                stock_status=offer.stock_status,
                 raw_data=deepcopy(raw_copy),
             ))
             session.flush()
