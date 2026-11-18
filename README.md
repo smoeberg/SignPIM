@@ -97,5 +97,34 @@ The initial API is available under /catalog:
 - POST /catalog/products
 - POST /catalog/suppliers/{supplier_id}/offers
 - POST /catalog/offers/{offer_id}/match-gtin
+- POST /catalog/suppliers/{supplier_id}/import
+
+### Supplier Hub adapter contract
+
+Each Supplier has an `adapter_key` and non-secret `adapter_config`. The application resolves that key through a central `SupplierAdapterRegistry`. Vendor-specific adapters implement the same `parse(payload, config) -> SupplierRecord[]` contract and can be registered at application startup.
+
+Built-in reference adapters:
+- `csv`: delimiter/encoding detection and per-supplier `field_map`.
+- `json`: JSON arrays with optional dotted `records_path` and per-supplier `field_map`.
+
+Both adapters produce the same offer contract. The Hub stores the original source row unchanged in `raw_data`, stores mapped identity fields in `normalized_data`, and writes offers/snapshots. It does not create canonical products; GTIN matching is performed only against an existing ProductMaster.
+
+Example supplier configuration:
+```json
+{
+  "adapter_key": "csv",
+  "adapter_config": {
+    "delimiter": ";",
+    "field_map": {
+      "supplier_sku": "Varenummer",
+      "cost_price": "Indkoebspris",
+      "gtin": "EAN",
+      "title": "Varetekst"
+    }
+  }
+}
+```
+
+SFTP connections now reject unknown SSH host keys. Configure a trusted known_hosts file through `sftp.known_hosts_path` or `SIGNPIM_SFTP_KNOWN_HOSTS`.
 
 See [ADR-016](docs/adr/ADR-016_Product_Master_Supplier_Offer.md) for the domain decision. The previous /products and generic feed ingestion paths are legacy surfaces; new supplier adapters and sales-channel integrations must be built on the canonical model.
