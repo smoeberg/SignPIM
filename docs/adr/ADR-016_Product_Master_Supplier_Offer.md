@@ -39,7 +39,15 @@ SupplierOffer.raw_data is the supplier payload, copied as received and never nor
 - POST /catalog/suppliers/{supplier_id}/offers
 - POST /catalog/offers/{offer_id}/match-gtin
 
-These endpoints are an initial domain API. Supplier-specific feed adapters and channel publishing are separate layers and are not implemented by this ADR.
+The initial catalogue API is complemented by the Supplier Hub import endpoint:
+
+- POST /catalog/suppliers/{supplier_id}/import
+
+Supplier adapters implement a shared parse(payload, config) -> SupplierRecord[] contract and are resolved through an explicit registry. Built-in CSV and JSON format adapters are reference implementations; each vendor-specific integration gets its own adapter key and mapping/configuration. All adapters emit the same SupplierRecord shape.
+
+The Hub validates the supplier and tenant, preserves the original source row in raw_data, stores mapped values separately in normalized_data, and upserts SupplierOffer plus SupplierOfferSnapshot. It never creates ProductMaster records from supplier feeds. Exact GTIN matching may link an imported offer only to an already-existing canonical product.
+
+Secrets are not adapter configuration. Supplier credentials remain referenced by credential_ref or external secret configuration. SFTP transport must verify SSH host keys and reject unknown hosts.
 
 ## Consequences
 

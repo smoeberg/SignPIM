@@ -23,6 +23,9 @@ from core.product_master import ProductMasterService, ProductMasterError
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 from services.images import ImageService, ImageError
+from services.supplier_adapters import (
+    SupplierHubService, SupplierAdapterError, SupplierAdapterRegistry,
+)
 
 logger = logging.getLogger("signpim.api")
 
@@ -53,6 +56,8 @@ LLMCallLogger.bind(persistence)
 kernel = PlatformKernel(meta_dir="meta")
 kernel.bootstrap()
 ingestion = CSVIngestionService(persistence, kernel)
+# Extension point: register vendor-specific adapters here during application startup.
+supplier_adapter_registry = SupplierAdapterRegistry.with_builtins()
 
 
 def _rescore_product(tenant_id: str, sku: str) -> None:
@@ -152,6 +157,11 @@ class SupplierCreate(BaseModel):
     adapter_key: str = Field(min_length=1, max_length=128)
     adapter_config: Dict[str, Any] = Field(default_factory=dict)
     credential_ref: Optional[str] = None
+
+
+class SupplierImportIn(BaseModel):
+    payload: str = Field(min_length=1)
+    content_type: Optional[str] = None
 
 
 class ProductMasterIn(BaseModel):
@@ -483,6 +493,32 @@ def ingest_csv(slug: str, body: str = Query(...),
     return result
 
 
+# ---------- Supplier Hub imports ----------
+@app.post("/catalog/suppliers/{supplier_id}/import", tags=["catalog"])
+def import_catalog_supplier_payload(
+    supplier_id: str,
+    body: SupplierImportIn,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("ingest:write")),
+):
+    """Parse a supplier payload through its registered adapter into SupplierOffers."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return SupplierHubService(
+            persistence, registry=supplier_adapter_registry
+        ).import_payload(
+            supplier_id,
+            body.payload,
+            expected_tenant_id=t.id,
+            content_type=body.content_type,
+        )
+    except (ProductMasterError, SupplierAdapterError) as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
 # ---------- canonical Product Master and supplier offers ----------
 @app.post("/catalog/suppliers", tags=["catalog"])
 def create_catalog_supplier(
@@ -740,13 +776,15 @@ def poll_feed(slug: str, mode: str = Query("local", pattern="^(local|sftp)$"),
         user = _sftp("sftp.user", "SIGNPIM_SFTP_USER", "signpim")
         password = _sftp("sftp.password", "SIGNPIM_SFTP_PASSWORD")
         key_path = os.environ.get("SIGNPIM_SFTP_KEY_PATH")
+        known_hosts_path = _sftp("sftp.known_hosts_path", "SIGNPIM_SFTP_KNOWN_HOSTS")
         if not password and not key_path:
             raise HTTPException(status_code=503,
                                 detail="SFTP needs sftp.password (admin config) or SIGNPIM_SFTP_PASSWORD/SIGNPIM_SFTP_KEY_PATH")
         importer = SFTPFeedImporter(persistence, ingestion)
         return importer.poll(slug, host=host, remote_dir=remote_dir, username=user,
                              password=password, key_path=key_path,
-                             port=int(_sftp("sftp.port", "SIGNPIM_SFTP_PORT", "22")))
+                             port=int(_sftp("sftp.port", "SIGNPIM_SFTP_PORT", "22")),
+                             known_hosts_path=known_hosts_path)
     if not directory:
         raise HTTPException(status_code=400, detail="mode=local requires 'directory'")
     importer = LocalFeedImporter(persistence, ingestion)

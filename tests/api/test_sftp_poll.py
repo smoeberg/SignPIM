@@ -93,3 +93,64 @@ def test_sftp_poll_isolated_per_tenant(env, monkeypatch):
     # other tenant with no access cannot poll acme via its own slug
     r = env.post("/feeds/other/poll", params={"mode": "sftp"})
     assert r.status_code in (403, 404)
+
+
+
+def test_sftp_connection_rejects_unknown_host_keys(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from services.feed_import import SFTPFeedImporter
+
+    calls = []
+    policy = object()
+
+    class FakeSSHClient:
+        def load_system_host_keys(self):
+            calls.append(("load_system_host_keys",))
+
+        def load_host_keys(self, path):
+            calls.append(("load_host_keys", path))
+
+        def set_missing_host_key_policy(self, value):
+            calls.append(("policy", value))
+
+        def connect(self, **kwargs):
+            calls.append(("connect", kwargs))
+
+    monkeypatch.setitem(sys.modules, "paramiko", SimpleNamespace(
+        SSHClient=FakeSSHClient, RejectPolicy=lambda: policy,
+    ))
+    importer = SFTPFeedImporter(None, None)
+    client = importer._connect("supplier.example", 22, "feeduser", password="secret")
+    assert isinstance(client, FakeSSHClient)
+    assert ("load_system_host_keys",) in calls
+    assert ("policy", policy) in calls
+    assert not any(name == "AutoAddPolicy" for name, *_ in calls)
+
+
+def test_sftp_connection_accepts_explicit_known_hosts_file(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+    from services.feed_import import SFTPFeedImporter
+
+    calls = []
+    class FakeSSHClient:
+        def load_system_host_keys(self):
+            calls.append(("system",))
+        def load_host_keys(self, path):
+            calls.append(("custom", path))
+        def set_missing_host_key_policy(self, value):
+            calls.append(("policy", value))
+        def connect(self, **kwargs):
+            calls.append(("connect", kwargs))
+
+    monkeypatch.setitem(sys.modules, "paramiko", SimpleNamespace(
+        SSHClient=FakeSSHClient, RejectPolicy=lambda: "reject",
+    ))
+    SFTPFeedImporter(None, None)._connect(
+        "supplier.example", 22, "feeduser", password="secret",
+        known_hosts_path="/run/secrets/supplier_known_hosts",
+    )
+    assert ("custom", "/run/secrets/supplier_known_hosts") in calls
+    assert ("policy", "reject") in calls
+    assert ("system",) not in calls

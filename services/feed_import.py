@@ -44,10 +44,16 @@ class SFTPFeedImporter:
 
     # ---------- transport ----------
     def _connect(self, host: str, port: int, username: str, password: str = None,
-                 key_path: str = None):
+                 key_path: str = None, known_hosts_path: str = None):
         import paramiko
         client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        if known_hosts_path:
+            client.load_host_keys(known_hosts_path)
+        else:
+            client.load_system_host_keys()
+        # Never trust a new host key automatically: SFTP credentials and feed
+        # contents must not be exposed to an unverified endpoint.
+        client.set_missing_host_key_policy(paramiko.RejectPolicy())
         kwargs = {"hostname": host, "port": port, "username": username,
                   "timeout": 30, "allow_agent": False, "look_for_keys": False}
         if key_path:
@@ -107,9 +113,10 @@ class SFTPFeedImporter:
 
     # ---------- main poll loop ----------
     def poll(self, tenant_slug: str, host: str, remote_dir: str, username: str,
-             password: str = None, key_path: str = None, port: int = 22) -> Dict[str, Any]:
+             password: str = None, key_path: str = None, port: int = 22,
+             known_hosts_path: str = None) -> Dict[str, Any]:
         """Poll once: list → download new/changed → ingest → mark state."""
-        client = self._connect(host, port, username, password, key_path)
+        client = self._connect(host, port, username, password, key_path, known_hosts_path)
         results = []
         try:
             t = self.persistence.get_or_create_tenant(tenant_slug)

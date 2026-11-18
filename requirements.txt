@@ -8,3 +8,4 @@ pydantic>=2.0.0
 python-dotenv>=1.0.0
 uvicorn>=0.30.0
 cryptography>=42.0
+paramiko>=3.4,<5
