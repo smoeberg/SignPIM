@@ -57,7 +57,7 @@ def test_catalog_api_creates_master_supplier_offer_and_exact_match(client):
     assert offer_response.json()["product_id"] is None
 
     match_response = http.post(
-        f"/catalog/offers/{offer_id}/match-gtin?tenant=acme&gtin=4006381333931"
+        f"/catalog/offers/{offer_id}/match-gtin?tenant=acme"
     )
     assert match_response.status_code == 200, match_response.text
     assert match_response.json()["product_id"] == product_id
