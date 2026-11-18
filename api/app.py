@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from core.persistence import PersistenceService
+from core.product_master import ProductMasterService, ProductMasterError
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 from services.images import ImageService, ImageError
@@ -143,6 +144,41 @@ class MappingIn(BaseModel):
     source_value: str
     normalized: str
     field: str
+
+
+class SupplierCreate(BaseModel):
+    code: str = Field(min_length=1, max_length=96)
+    name: str = Field(min_length=1, max_length=255)
+    adapter_key: str = Field(min_length=1, max_length=128)
+    adapter_config: Dict[str, Any] = Field(default_factory=dict)
+    credential_ref: Optional[str] = None
+
+
+class ProductMasterIn(BaseModel):
+    master_sku: str = Field(min_length=1, max_length=128)
+    name: str = Field(min_length=1, max_length=512)
+    gtin: Optional[str] = None
+    brand: Optional[str] = None
+    manufacturer: Optional[str] = None
+    mpn: Optional[str] = None
+    description: Optional[str] = None
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+    translations: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SupplierOfferIn(BaseModel):
+    supplier_sku: str = Field(min_length=1, max_length=160)
+    raw_data: Dict[str, Any]
+    supplier_product_id: Optional[str] = None
+    normalized_data: Dict[str, Any] = Field(default_factory=dict)
+    supplier_url: Optional[str] = None
+    title: Optional[str] = None
+    description: Optional[str] = None
+    cost_price: Optional[float] = None
+    currency: Optional[str] = None
+    stock_quantity: Optional[float] = None
+    stock_status: Optional[str] = None
+    active: Optional[bool] = None
 
 
 # ---------- export ----------
@@ -429,7 +465,7 @@ def health():
 
 # ---------- ingestion ----------
 @app.post("/tenants/{slug}/ingest", tags=["ingestion"])
-def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv"),
+def ingest_csv(slug: str, body: str = Query(...),
                info: dict = Depends(require_scope("ingest:write"))):
     """Ingest a raw supplier CSV feed for a tenant (Feed-First front door)."""
     if slug != _slug_of(info):
@@ -445,6 +481,138 @@ def ingest_csv(slug: str, body: str = Query(..., media_type="text/csv"),
     except IngestionError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return result
+
+
+# ---------- canonical Product Master and supplier offers ----------
+@app.post("/catalog/suppliers", tags=["catalog"])
+def create_catalog_supplier(
+    body: SupplierCreate,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("ingest:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return ProductMasterService(persistence).create_supplier(
+            t.id, body.code, body.name, body.adapter_key,
+            body.adapter_config, body.credential_ref,
+        )
+    except ProductMasterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/catalog/products", tags=["catalog"])
+def upsert_catalog_product(
+    body: ProductMasterIn,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return ProductMasterService(persistence).upsert_product_master(
+            t.id, **body.model_dump(exclude_unset=True)
+        )
+    except ProductMasterError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/catalog/suppliers/{supplier_id}/offers", tags=["catalog"])
+def upsert_catalog_supplier_offer(
+    supplier_id: str,
+    body: SupplierOfferIn,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("ingest:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return ProductMasterService(persistence).upsert_supplier_offer(
+            supplier_id, expected_tenant_id=t.id, **body.model_dump(exclude_unset=True)
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+@app.post("/catalog/offers/{offer_id}/match-gtin", tags=["catalog"])
+def match_catalog_offer_by_gtin(
+    offer_id: str,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    try:
+        t = persistence.get_or_create_tenant(tenant)
+        match = ProductMasterService(persistence).match_offer_by_gtin(
+            offer_id, expected_tenant_id=t.id
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+    if match is None:
+        raise HTTPException(status_code=404, detail="No exact GTIN match found")
+    return match
+
+
+@app.post("/catalog/offers/{offer_id}/match-brand-mpn", tags=["catalog"])
+def propose_catalog_match_by_brand_mpn(
+    offer_id: str,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return ProductMasterService(persistence).suggest_brand_mpn_matches(
+            offer_id, expected_tenant_id=t.id
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+@app.post("/catalog/matches/{match_id}/confirm", tags=["catalog"])
+def confirm_catalog_match(
+    match_id: str,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    reviewer = str(info.get("user_id") or info.get("key_id") or "api")
+    try:
+        return ProductMasterService(persistence).confirm_match(
+            match_id, expected_tenant_id=t.id, reviewer=reviewer
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
+
+
+@app.post("/catalog/matches/{match_id}/reject", tags=["catalog"])
+def reject_catalog_match(
+    match_id: str,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("products:write")),
+):
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    reviewer = str(info.get("user_id") or info.get("key_id") or "api")
+    try:
+        return ProductMasterService(persistence).reject_match(
+            match_id, expected_tenant_id=t.id, reviewer=reviewer
+        )
+    except ProductMasterError as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
 
 
 # ---------- products ----------

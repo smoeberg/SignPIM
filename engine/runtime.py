@@ -57,32 +57,32 @@ class PureGraphRuntime:
                         ctx['data'][op.field] = ctx['data'][op.field] * float(op.target_value)
                         logger.info(f"Transformed field [{op.field}] using operator multiply: {ctx['data'][op.field]}")
 
-            elif action.action_type == 'calculate':
-                # Fix Bug 2: implement the scoring step.
-                w = scoring or {'completeness': 0.4, 'consistency': 0.4, 'accuracy': 0.2}
-                if sum(w.values()) > 0:
-                    w = {k: v / sum(w.values()) for k, v in w.items()}
+            elif action.action_type in {'calculate', 'calculate_quality'}:
                 # Severity-based deductions against a perfect 100 score.
-                SEVERITY_DEDUCTION = {'critical': 25.0, 'major': 15.0, 'minor': 5.0, 'info': 1.0}
+                severity_deduction = {'critical': 25.0, 'major': 15.0, 'minor': 5.0, 'info': 1.0}
                 deduction = 0.0
                 seen = set()
-                for v in ctx['violations']:
-                    rule_id = v["rule_id"] if isinstance(v, dict) else v
-                    if rule_id in seen:      # re-validation of AI output must not double-punish
+                for violation in ctx['violations']:
+                    rule_id = violation.get('rule_id') if isinstance(violation, dict) else violation
+                    if rule_id in seen:
                         continue
                     seen.add(rule_id)
                     rule_meta = (entity_meta or {}).get('_rule_meta', {}).get(rule_id, {})
-                    deduction += SEVERITY_DEDUCTION.get(rule_meta.get('severity', 'major'), 15.0)
+                    deduction += severity_deduction.get(rule_meta.get('severity', 'major'), 15.0)
                 ctx['data']['quality_score'] = round(max(0.0, 100.0 - deduction), 2)
-                logger.info(f"Calculated quality_score: {ctx['data']['quality_score']} (violations: {ctx['violations']})")
+                logger.info("Calculated quality_score: %s", ctx['data']['quality_score'])
 
-            elif action.action_type == 'ai_enrich':
-                op_name = getattr(action, 'operator', None) or 'llm_enrich'
+            elif action.action_type in {'ai_enrich', 'ai_images', 'operator'}:
+                op_name = action.operator or (
+                    'llm_enrich' if action.action_type == 'ai_enrich' else
+                    'ai_resolve_images' if action.action_type == 'ai_images' else None
+                )
+                if not op_name:
+                    raise ValueError(f"Workflow action '{action.action_type}' requires an operator")
                 op_def = RichOperatorRegistry.get(op_name)
                 if op_def is None:
-                    raise ValueError(f"Unknown AI operator: {op_name}")
-                cfg = getattr(action, 'config', None) or {}
-                ctx['operator_config'] = cfg
+                    raise ValueError(f"Unknown workflow operator: {op_name}")
+                ctx['operator_config'] = dict(action.config or {})
                 ctx['data'] = op_def.fn(ctx['data'], ctx)
 
             elif action.action_type == 'persist':
