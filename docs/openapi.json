@@ -930,6 +930,7 @@
           "catalog"
         ],
         "summary": "Import Catalog Supplier Payload",
+        "description": "Parse a supplier payload through its registered adapter into SupplierOffers.",
         "operationId": "import_catalog_supplier_payload_catalog_suppliers__supplier_id__import_post",
         "parameters": [
           {
@@ -981,8 +982,7 @@
               }
             }
           }
-        },
-        "description": "Parse a supplier payload through its registered adapter into SupplierOffers."
+        }
       }
     },
     "/catalog/suppliers": {
@@ -2357,7 +2357,7 @@
           },
           "price": {
             "type": "number",
-            "exclusiveMinimum": 0,
+            "exclusiveMinimum": 0.0,
             "title": "Price"
           },
           "ean": {
