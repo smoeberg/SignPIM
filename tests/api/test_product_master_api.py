@@ -75,3 +75,44 @@ def test_catalog_api_rejects_cross_tenant_supplier_offer_access(client):
     )
     assert response.status_code == 400
     assert "does not belong to tenant" in response.json()["detail"]
+
+
+
+def test_catalog_api_requires_review_to_apply_brand_mpn_match(client):
+    http, persistence, tenant_id = client
+    supplier = http.post("/catalog/suppliers?tenant=acme", json={
+        "code": "supplier-review",
+        "name": "Supplier Review",
+        "adapter_key": "supplier_review",
+    }).json()
+    product = http.post("/catalog/products?tenant=acme", json={
+        "master_sku": "MASTER-REVIEW",
+        "name": "Review product",
+        "brand": "Example",
+        "mpn": "MODEL-REVIEW",
+    }).json()
+    offer = http.post(
+        f"/catalog/suppliers/{supplier['id']}/offers?tenant=acme",
+        json={"supplier_sku": "REVIEW-1", "raw_data": {"sku": "REVIEW-1"}},
+    ).json()
+
+    proposal_response = http.post(
+        f"/catalog/offers/{offer['id']}/match-brand-mpn",
+        params={"tenant": "acme", "brand": "Example", "mpn": "MODEL-REVIEW"},
+    )
+    assert proposal_response.status_code == 200, proposal_response.text
+    proposal = proposal_response.json()[0]
+    assert proposal["status"] == "proposed"
+
+    with persistence.session() as session:
+        from core.models import SupplierOffer
+        assert session.get(SupplierOffer, offer["id"]).product_id is None
+
+    confirmed = http.post(
+        f"/catalog/matches/{proposal['id']}/confirm?tenant=acme"
+    )
+    assert confirmed.status_code == 200, confirmed.text
+    assert confirmed.json()["status"] == "confirmed"
+    with persistence.session() as session:
+        from core.models import SupplierOffer
+        assert session.get(SupplierOffer, offer["id"]).product_id == product["id"]
