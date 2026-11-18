@@ -2631,9 +2631,15 @@
             "title": "Stock Status"
           },
           "active": {
-            "type": "boolean",
-            "title": "Active",
-            "default": true
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
           }
         },
         "type": "object",
