@@ -120,7 +120,8 @@ class ProductMasterService:
                 ProductMaster.tenant_id == tenant_id,
                 ProductMaster.master_sku == master_sku.strip(),
             ))
-            if product is None:
+            is_new = product is None
+            if is_new:
                 product = ProductMaster(
                     tenant_id=tenant_id,
                     master_sku=master_sku.strip(),
@@ -137,7 +138,7 @@ class ProductMasterService:
                 product.attributes = deepcopy(attributes)
             if translations is not None:
                 product.translations = deepcopy(translations)
-            if product.version > 1 or product.id:
+            if not is_new:
                 product.version += 1
             session.flush()
             return _as_dict(product, [
