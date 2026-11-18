@@ -23,6 +23,7 @@ from core.product_master import ProductMasterService, ProductMasterError
 from engine.kernel import PlatformKernel
 from services.ingestion import CSVIngestionService, IngestionError
 from services.images import ImageService, ImageError
+from services.supplier_adapters import SupplierHubService, SupplierAdapterError
 
 logger = logging.getLogger("signpim.api")
 
@@ -152,6 +153,11 @@ class SupplierCreate(BaseModel):
     adapter_key: str = Field(min_length=1, max_length=128)
     adapter_config: Dict[str, Any] = Field(default_factory=dict)
     credential_ref: Optional[str] = None
+
+
+class SupplierImportIn(BaseModel):
+    payload: str = Field(min_length=1)
+    content_type: Optional[str] = None
 
 
 class ProductMasterIn(BaseModel):
@@ -481,6 +487,30 @@ def ingest_csv(slug: str, body: str = Query(...),
     except IngestionError as e:
         raise HTTPException(status_code=422, detail=str(e))
     return result
+
+
+# ---------- Supplier Hub imports ----------
+@app.post("/catalog/suppliers/{supplier_id}/import", tags=["catalog"])
+def import_catalog_supplier_payload(
+    supplier_id: str,
+    body: SupplierImportIn,
+    tenant: str = "default",
+    persistence: PersistenceService = Depends(get_persistence),
+    info: dict = Depends(require_scope("ingest:write")),
+):
+    """Parse a supplier payload through its registered adapter into SupplierOffers."""
+    _enforce_tenant(info, tenant)
+    t = persistence.get_or_create_tenant(tenant)
+    try:
+        return SupplierHubService(persistence).import_payload(
+            supplier_id,
+            body.payload,
+            expected_tenant_id=t.id,
+            content_type=body.content_type,
+        )
+    except (ProductMasterError, SupplierAdapterError) as exc:
+        status = 404 if "not found" in str(exc) else 400
+        raise HTTPException(status_code=status, detail=str(exc))
 
 
 # ---------- canonical Product Master and supplier offers ----------
