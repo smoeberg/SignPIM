@@ -2914,13 +2914,11 @@
           "vat_rate_pct": {
             "anyOf": [
               {
-                "type": "number",
-                "exclusiveMaximum": 100.0,
-                "minimum": 0.0
+                "type": "number"
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               }
             ],
             "title": "Vat Rate Pct",
@@ -2940,12 +2938,11 @@
           "fx_buffer_pct": {
             "anyOf": [
               {
-                "type": "number",
-                "minimum": 0.0
+                "type": "number"
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               }
             ],
             "title": "Fx Buffer Pct",
@@ -2954,12 +2951,11 @@
           "approval_threshold_pct": {
             "anyOf": [
               {
-                "type": "number",
-                "minimum": 0.0
+                "type": "number"
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               }
             ],
             "title": "Approval Threshold Pct",
@@ -2995,12 +2991,11 @@
           "rate": {
             "anyOf": [
               {
-                "type": "number",
-                "exclusiveMinimum": 0.0
+                "type": "number"
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               }
             ],
             "title": "Rate",
@@ -3094,7 +3089,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               },
               {
                 "type": "null"
@@ -3110,7 +3105,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               },
               {
                 "type": "null"
@@ -3171,7 +3166,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               }
             ],
             "title": "Value",
@@ -3469,12 +3464,11 @@
           "landed_cost_pct": {
             "anyOf": [
               {
-                "type": "number",
-                "minimum": 0.0
+                "type": "number"
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               },
               {
                 "type": "null"
@@ -3485,12 +3479,11 @@
           "landed_cost_fixed_eur": {
             "anyOf": [
               {
-                "type": "number",
-                "minimum": 0.0
+                "type": "number"
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               },
               {
                 "type": "null"
@@ -3656,7 +3649,7 @@
               },
               {
                 "type": "string",
-                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                "pattern": "^-?\\d+(\\.\\d+)?$"
               },
               {
                 "type": "null"

@@ -18,7 +18,14 @@ from typing import Any, Dict, List, Optional
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Body
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, WithJsonSchema
+from typing import Annotated
+
+# Decimal with a version-independent OpenAPI schema (pydantic releases emit
+# different string patterns for Decimal, which would make the contract drift).
+Dec = Annotated[Decimal, WithJsonSchema({
+    "anyOf": [{"type": "number"}, {"type": "string", "pattern": r"^-?\d+(\.\d+)?$"}],
+})]
 
 from core.persistence import PersistenceService
 from core.product_master import ProductMasterService, ProductMasterError
@@ -160,8 +167,8 @@ class SupplierCreate(BaseModel):
     adapter_key: str = Field(min_length=1, max_length=128)
     adapter_config: Dict[str, Any] = Field(default_factory=dict)
     credential_ref: Optional[str] = None
-    landed_cost_pct: Optional[Decimal] = Field(default=None, ge=0)
-    landed_cost_fixed_eur: Optional[Decimal] = Field(default=None, ge=0)
+    landed_cost_pct: Optional[Dec] = Field(default=None, ge=0)
+    landed_cost_fixed_eur: Optional[Dec] = Field(default=None, ge=0)
 
 
 class SupplierImportIn(BaseModel):
@@ -195,7 +202,7 @@ class SupplierOfferIn(BaseModel):
     stock_quantity: Optional[float] = None
     stock_status: Optional[str] = None
     active: Optional[bool] = None
-    rrp: Optional[Decimal] = None
+    rrp: Optional[Dec] = None
     rrp_currency: Optional[str] = None
     rrp_includes_vat: Optional[bool] = None
 
@@ -205,20 +212,20 @@ class ChannelIn(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     platform: str = "prestashop"
     base_currency: str = "EUR"
-    vat_rate_pct: Decimal = Field(default=Decimal(0), ge=0, lt=100)
+    vat_rate_pct: Dec = Field(default=Decimal(0), ge=0, lt=100)
     rounding: Dict[str, Dict[str, str]] = Field(
         default_factory=dict,
         description='Per currency, e.g. {"DKK": {"step": "10", "minus": "0.05"}} -> x9.95',
     )
-    fx_buffer_pct: Decimal = Field(default=Decimal(0), ge=0)
-    approval_threshold_pct: Decimal = Field(default=Decimal(10), ge=0)
+    fx_buffer_pct: Dec = Field(default=Decimal(0), ge=0)
+    approval_threshold_pct: Dec = Field(default=Decimal(10), ge=0)
     preferred_supplier_id: Optional[str] = None
 
 
 class PriceRuleIn(BaseModel):
     method: str = Field(pattern="^(markup|margin|fixed)$",
                         description="markup = avance, margin = dækningsgrad, fixed = EUR excl. VAT")
-    value: Decimal = Field(description="Percent for markup/margin (30 = 30 %), EUR for fixed")
+    value: Dec = Field(description="Percent for markup/margin (30 = 30 %), EUR for fixed")
     channel_id: Optional[str] = None
     product_id: Optional[str] = None
     category: Optional[str] = None
@@ -226,8 +233,8 @@ class PriceRuleIn(BaseModel):
 
 
 class PriceFloorIn(BaseModel):
-    min_price: Optional[Decimal] = Field(default=None, description="EUR excl. VAT")
-    min_margin_pct: Optional[Decimal] = Field(default=None, description="Dækningsgrad in percent")
+    min_price: Optional[Dec] = Field(default=None, description="EUR excl. VAT")
+    min_margin_pct: Optional[Dec] = Field(default=None, description="Dækningsgrad in percent")
     channel_id: Optional[str] = None
     product_id: Optional[str] = None
     category: Optional[str] = None
@@ -235,7 +242,7 @@ class PriceFloorIn(BaseModel):
 
 class ExchangeRateIn(BaseModel):
     currency: str = Field(min_length=3, max_length=3)
-    rate: Decimal = Field(gt=0, description="Units of currency per 1 EUR")
+    rate: Dec = Field(gt=0, description="Units of currency per 1 EUR")
     valid_on: Optional[date] = None
     source: str = "manual"
 
