@@ -562,8 +562,6 @@ def match_catalog_offer_by_gtin(
 @app.post("/catalog/offers/{offer_id}/match-brand-mpn", tags=["catalog"])
 def propose_catalog_match_by_brand_mpn(
     offer_id: str,
-    brand: str = Query(..., min_length=1),
-    mpn: str = Query(..., min_length=1),
     tenant: str = "default",
     persistence: PersistenceService = Depends(get_persistence),
     info: dict = Depends(require_scope("products:write")),
@@ -572,7 +570,7 @@ def propose_catalog_match_by_brand_mpn(
     t = persistence.get_or_create_tenant(tenant)
     try:
         return ProductMasterService(persistence).suggest_brand_mpn_matches(
-            offer_id, brand, mpn, expected_tenant_id=t.id
+            offer_id, expected_tenant_id=t.id
         )
     except ProductMasterError as exc:
         status = 404 if "not found" in str(exc) else 400
